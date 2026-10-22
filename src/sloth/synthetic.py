@@ -141,7 +141,9 @@ ACTIVITIES: dict[str, Activity] = {
             mean_s=500,
         ),
         Activity(BROWSER, "Media > Video", ("Netflix",), url="netflix.com", mean_s=1200),
-        Activity("vlc.exe", "Media > Video", ("episode_{n}.mkv - VLC media player",), covered=False, mean_s=1200),
+        Activity(
+            "vlc.exe", "Media > Video", ("episode_{n}.mkv - VLC media player",), covered=False, mean_s=1200
+        ),
         Activity(BROWSER, "Media > Social", ("r/programming - Reddit",), url="reddit.com", mean_s=90),
         Activity(BROWSER, "Media > Social", ("Home / X",), url="x.com", covered=False, mean_s=70),
         Activity("steam.exe", "Media > Games", ("Steam",), mean_s=120),
