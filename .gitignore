@@ -8,3 +8,14 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Real ActivityWatch exports never get committed (window titles, URLs)
+data/
+*.csv
+!tests/fixtures/*.csv
+reports/timings.jsonl
+sloth.local.toml
+.pytest_cache/
+
+# Secrets
+.env
