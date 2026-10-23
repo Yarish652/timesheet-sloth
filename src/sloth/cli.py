@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import typer
@@ -26,6 +27,8 @@ def _todo(milestone: str) -> None:
 @app.callback()
 def _main(ctx: typer.Context) -> None:
     config.load_dotenv()
+    # TabPFN warns on every CPU fit that a GPU would be faster; we know, it's the point.
+    warnings.filterwarnings("ignore", category=UserWarning, module=r"tabpfn(\..*)?$")
     # Everything except one-time setup runs with non-local networking blocked.
     if ctx.invoked_subcommand != "setup":
         netguard.install()
@@ -269,17 +272,157 @@ def eval_label(
 def eval_forecast(
     data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
     backtest_days: int = typer.Option(14, help="Rolling-origin backtest length in days."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
 ) -> None:
     """Rolling-origin backtest of the focus forecast vs naive baselines."""
-    _todo("M3")
+    from sloth import data as data_mod
+    from sloth import forecast, report
+
+    cfg = config.load()
+    d = _data_dir(data)
+    use_starter = _use_starter(d, starter_rules)
+    kind = "synthetic" if data_mod.is_synthetic(d) else "real"
+    name = f"{kind} data, starter rules {'on' if use_starter else 'off'}"
+    blocks = data_mod.load_blocks(d, cfg, starter_rules=use_starter)
+    console.print(
+        f"Data: {d} ({name}). Focus = minutes in {cfg.work_categories} within blocks with "
+        f"<= {cfg.focus_max_switches} app switches."
+    )
+    console.print(f"Backtesting {backtest_days} days, one TabPFN fit per day (rolling origin)...")
+    res = forecast.backtest(blocks, cfg, days=backtest_days)
+
+    t = Table(title="Per test day: train range, focus hours, block MAE in minutes per method")
+    cols = ("test day", "trained on", "actual h", "TabPFN h", "TabPFN", "last week", "4-wk avg", "zero")
+    for col in cols:
+        t.add_column(col, justify="left" if col in cols[:2] else "right", no_wrap=True)
+    for r in res["per_day"]:
+        t.add_row(
+            r["date"], f"{r['train_from'][5:]}..{r['train_to'][5:]}", f"{r['actual_h']:.2f}",
+            f"{r['TabPFN pred_h']:.2f}", f"{r['TabPFN mae']:.2f}", f"{r['same as last week mae']:.2f}",
+            f"{r['rolling 4-week average mae']:.2f}", f"{r['always zero mae']:.2f}",
+        )  # fmt: skip
+    console.print(t)
+
+    summary = [
+        {
+            "method": m,
+            "block_mae": res["block_mae_min"][m],
+            "daily_mae": res["daily_mae_hours"][m],
+            "days_won": sum(
+                r[f"{m} mae"] <= min(r[f"{o} mae"] for o in forecast.METHODS) for r in res["per_day"]
+            ),
+        }
+        for m in forecast.METHODS
+    ]
+    s = Table(title="Overall")
+    for col in ("method", "block MAE (min)", "daily-total MAE (h)", "days best (block MAE)"):
+        s.add_column(col, justify="left" if col == "method" else "right")
+    for r in summary:
+        s.add_row(
+            r["method"],
+            f"{r['block_mae']:.2f}",
+            f"{r['daily_mae']:.2f}",
+            f"{r['days_won']}/{len(res['per_day'])}",
+        )
+    console.print(s)
+    console.print(
+        f"TabPFN 80% interval coverage: {res['interval_80_coverage']:.1%} of blocks | mean actual focus "
+        f"{res['mean_daily_focus_hours']:.2f} h/day | runtime {res['seconds']:.0f} s"
+    )
+
+    per_day_md = [
+        {
+            "date": r["date"],
+            "train": f"{r['train_from']}..{r['train_to']}",
+            "actual_h": r["actual_h"],
+            "tabpfn_h": r["TabPFN pred_h"],
+            "tabpfn": r["TabPFN mae"],
+            "lastweek": r["same as last week mae"],
+            "rolling": r["rolling 4-week average mae"],
+            "zero": r["always zero mae"],
+        }
+        for r in res["per_day"]
+    ]
+    md = "\n\n".join(
+        [
+            f"## Focus forecast backtest ({name})",
+            f"Rolling origin over the last {len(res['per_day'])} complete days: each test day is predicted "
+            "by a model trained only on blocks before that day's 00:00. Focus = minutes in "
+            f"{', '.join(cfg.work_categories)} categories within blocks with <= {cfg.focus_max_switches} "
+            f"app switches. Mean actual focus {res['mean_daily_focus_hours']:.2f} h/day. Runtime "
+            f"{res['seconds']:.0f} s.",
+            report.table(
+                summary,
+                [
+                    ("method", "method"),
+                    ("block_mae", "block MAE (min)"),
+                    ("daily_mae", "daily-total MAE (h)"),
+                    ("days_won", "days best"),
+                ],
+            ),
+            f"TabPFN 80% predictive interval (10%-90% quantiles) covered {res['interval_80_coverage']:.1%} "
+            "of blocks.",
+            "<details><summary>Per day</summary>\n\n"
+            + report.table(
+                per_day_md,
+                [
+                    ("date", "test day"),
+                    ("train", "trained on"),
+                    ("actual_h", "actual h"),
+                    ("tabpfn_h", "TabPFN h"),
+                    ("tabpfn", "TabPFN MAE"),
+                    ("lastweek", "last-week MAE"),
+                    ("rolling", "4-wk MAE"),
+                    ("zero", "zero MAE"),
+                ],
+            )
+            + "\n\n</details>",
+        ]
+    )
+    path = report.update_section(f"forecast:{name}", md)
+    console.print(f"[dim]Saved to {path}[/]")
 
 
 @app.command("plan-tomorrow")
 def plan_tomorrow(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Print the raw forecast only."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
 ) -> None:
     """Forecast tomorrow's focus hours and suggest when to do hard work."""
-    _todo("M3/M4")
+    from sloth import data as data_mod
+    from sloth import forecast
+
+    cfg = config.load()
+    d = _data_dir(data)
+    blocks = data_mod.load_blocks(d, cfg, starter_rules=_use_starter(d, starter_rules))
+    fc = forecast.forecast_day(blocks, cfg)
+    tr_from, tr_to = fc.attrs["train_dates"]
+    t = Table(
+        title=f"Raw forecast for {fc['date'].iloc[0]} (focus min per block; trained on {tr_from}..{tr_to})"
+    )
+    for col in ("block", "mean", "10%", "50%", "90%", ""):
+        t.add_column(col, justify="left" if col in ("block", "") else "right")
+    for r in fc.itertuples():
+        if r.q90 < 0.5 and r.pred < 0.5:
+            continue  # nights and other blocks with nothing expected
+        t.add_row(
+            f"{r.block_start:%H:%M}", f"{r.pred:.1f}", f"{r.q10:.1f}", f"{r.q50:.1f}", f"{r.q90:.1f}",
+            "#" * round(r.pred),
+        )  # fmt: skip
+    console.print(t)
+    p = forecast.plan(fc, blocks, cfg)
+    console.print(
+        f"Predicted focus: [bold]{p['predicted_focus_hours']:.1f} h[/] "
+        f"(rough range {p['range_hours'][0]:.1f}-{p['range_hours'][1]:.1f} h; "
+        f"your typical day {p['typical_focus_hours']:.1f} h)"
+    )
+    for w in p["best_windows"]:
+        console.print(f"  best window {w['start']}-{w['end']}: ~{w['expected_focus_min']} focus min expected")
+    if p["rest_day"]:
+        console.print("  Looks like a low-focus day. Rest without guilt.")
+    if not no_llm:
+        console.print("[yellow]Gemma's write-up of this plan lands in M4.[/] Showing the raw forecast only.")
 
 
 @app.command()

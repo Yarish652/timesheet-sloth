@@ -158,3 +158,52 @@ predict time. CPU, Ryzen 5 7520U: 48 train → 55 test 2.8 s; 281 → 99 8.1 s; 
 **Test hygiene.** Tests were appending to `reports/timings.jsonl`, the file the write-up cites.
 `tests/conftest.py` now points the log at a temp dir. Plumbing tests use a RandomForest stand-in
 for speed; one `@pytest.mark.slow` test runs the real TabPFN checkpoint.
+
+## M3: TabPFN focus forecast (2026-10-23)
+
+**Setup.** TabPFNRegressor (3.5 Fast) predicts focus minutes for each of tomorrow's 48 blocks.
+The features are only things known the evening before: block/hour/weekday, same block yesterday,
+same block last week, the 4-week same-weekday mean, yesterday's total, and yesterday's/last week's
+active minutes. `predict(output_type="main", quantiles=[.1,.5,.9])` returns the mean and the
+quantiles in one call, half the cost of calling it twice. The backtest uses a rolling origin:
+for each of the last 14 complete days, train only on blocks before that day's 00:00, with
+up to 5,000 rows.
+
+**Leakage test that can fail.** `tests/test_no_leakage.py` scrambles every event at or after
+D 00:00 (drops 40%, shuffles categories and apps, moves and resizes events, adds fake 25-minute
+Code.exe events) and asserts that day D's features, and all earlier features and targets, are
+bit-identical. To prove the test has teeth, I planted three leaky features in turn
+(`prev_focus_min`, same-day `focus_min`, same-day `active_min`). Each one made it fail.
+
+**Honest result: TabPFN does not win the headline metric.**
+- Real data (mean focus **0.40 h/day**): block MAE TabPFN 0.67 min vs always-zero **0.50**,
+  4-week mean 0.86, last week 1.03. On **daily totals** TabPFN *is* best: 0.32 h vs zero 0.40,
+  4-week 0.46, last week 0.60. Per day, TabPFN never has the lowest block MAE (0/14).
+  Always-zero wins 13/14.
+- Synthetic (1.46 h/day): block MAE zero 1.82 < TabPFN 2.40 < last week 2.54 < 4-week 2.64.
+  Daily totals: 4-week mean 0.54 h best, last week 0.65, TabPFN 0.77, zero 1.46.
+- **"Always zero" was added after the first real run**, when the arithmetic (0.40 h × 60 / 48
+  blocks = 0.50 min) showed it would beat everything on block MAE. MAE rewards the median, and
+  most blocks have zero focus. The predictor was not changed; the baseline is there so the
+  table can't flatter it.
+- TabPFN's mean underpredicts big days: real 10-09 1.40 h actual vs 0.23 h predicted;
+  synthetic 10-22 2.82 h vs 1.66 h. It hedges towards the many zero blocks.
+- 80% intervals are **too wide**: they covered 92.7% (real) and 91.2% (synthetic) of blocks,
+  more than the nominal 80%. They're conservative, not well calibrated.
+
+**What that means for the product.** At block level, "you probably won't focus at 3 a.m." is
+all any method knows, and a zero predictor knows it best. TabPFN's useful outputs are the daily
+total (best of four methods on real data) and the per-block distribution: the 90% quantile
+marks the hours where focus is *possible*. `plan-tomorrow` uses those. Not tuned, per the brief.
+Ideas *not* tried: forecasting daily totals directly, or a two-stage "will I be at the laptop"
+plus "how much focus" model.
+
+**Timing.** Real backtest: 910–954 s for 14 days (~65 s per test day, ~5,000 training rows,
+48 test rows). Synthetic: 177 s (~13 s per day, ~1,300 rows). TabPFN's predict cost grows with
+training rows, since it's an in-context learner. `plan-tomorrow` (one fit) takes ~37 s on synthetic.
+
+**Small things that broke.** Python on Windows defaults to cp1252 for `read_text()`, so a
+patch that tried to match a "·" failed (the file round-tripped fine, the match didn't); always
+pass `encoding="utf-8"`. Rich wrapped the date columns into unreadable stubs at 80 columns; it
+now uses `MM-DD` and `no_wrap`. TabPFN prints "Consider using a GPU…" on every CPU fit; the CLI
+filters that one UserWarning.
