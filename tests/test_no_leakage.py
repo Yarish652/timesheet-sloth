@@ -41,9 +41,7 @@ def _scramble_from(events: pd.DataFrame, cutoff: pd.Timestamp, seed: int) -> pd.
 
 @pytest.mark.parametrize("days_before_end", [1, 6, 13])
 @pytest.mark.parametrize("seed", [0, 1])
-def test_day_d_features_ignore_events_from_d_onwards(
-    events: pd.DataFrame, days_before_end: int, seed: int
-) -> None:
+def test_day_d_features_ignore_events_from_d_onwards(events: pd.DataFrame, days_before_end: int, seed: int) -> None:
     day = END - dt.timedelta(days=days_before_end)
     cutoff = pd.Timestamp(day, tz=CFG.timezone)
     a = features.build_blocks(events, CFG)

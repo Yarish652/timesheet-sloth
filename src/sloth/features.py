@@ -67,6 +67,28 @@ def _is_work(category: str, cfg: Config) -> bool:
     return any(category == w or category.startswith(w + " > ") for w in cfg.work_categories)
 
 
+def count_shifts(categories: list[str] | np.ndarray, cfg: Config) -> int:
+    """Shifts from work to a known non-work category, in order. Uncategorized and away time are
+    neutral (skipped), so work -> Uncategorized -> video still counts as one shift."""
+    shifts, prev_work = 0, None
+    for c in categories:
+        if c in (UNCATEGORIZED, AFK):
+            continue
+        work = _is_work(c, cfg)
+        if prev_work and not work:
+            shifts += 1
+        prev_work = work
+    return shifts
+
+
+def passes_focus_rule(n_switches: int, n_shifts: int, cfg: Config) -> bool:
+    if cfg.focus_rule == "switches":
+        return n_switches <= cfg.focus_max_switches
+    if cfg.focus_rule == "shifts":
+        return n_shifts <= cfg.focus_max_shifts
+    raise ValueError(f"Unknown focus_rule {cfg.focus_rule!r} (use 'shifts' or 'switches')")
+
+
 def build_blocks(events: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     """One row per (date, block) over every day in range, including idle blocks.
 
@@ -84,6 +106,7 @@ def build_blocks(events: pd.DataFrame, cfg: Config) -> pd.DataFrame:
         app_s = g.groupby("app")["seconds"].sum()
         apps = g["app"].to_numpy()
         switches = int((apps[1:] != apps[:-1]).sum())
+        shifts = count_shifts(g["category"].to_numpy(), cfg)
         tok: dict[str, float] = defaultdict(float)
         for title, url, s in zip(g["title"], g["url"], secs, strict=True):
             for t in tokens(str(title), str(url)):
@@ -102,9 +125,10 @@ def build_blocks(events: pd.DataFrame, cfg: Config) -> pd.DataFrame:
             "n_apps": len(app_s),
             "n_events": len(g),
             "n_switches": switches,
+            "n_shifts": shifts,
             "browser_share": float(secs[(g["url"] != "").to_numpy()].sum() / secs.sum()),
             "work_min": work_min,
-            "focus_min": work_min if switches <= cfg.focus_max_switches else 0.0,
+            "focus_min": work_min if passes_focus_rule(switches, shifts, cfg) else 0.0,
             "token_seconds": dict(tok),
         }
         if has_truth:
@@ -123,12 +147,12 @@ def build_blocks(events: pd.DataFrame, cfg: Config) -> pd.DataFrame:
     b = grid.merge(active, on="block_start", how="left")
     fill = {
         "active_min": 0.0, "uncategorized_min": 0.0, "n_apps": 0, "n_events": 0, "n_switches": 0,
-        "browser_share": 0.0, "work_min": 0.0, "focus_min": 0.0, "category": AFK,
+        "n_shifts": 0, "browser_share": 0.0, "work_min": 0.0, "focus_min": 0.0, "category": AFK,
         "known_category": AFK, "top_app": "", "top_domain": "",
     }  # fmt: skip
     b = b.fillna(fill)
     b["token_seconds"] = b["token_seconds"].map(lambda x: x if isinstance(x, dict) else {})
-    for c in ("n_apps", "n_events", "n_switches"):
+    for c in ("n_apps", "n_events", "n_switches", "n_shifts"):
         b[c] = b[c].astype(int)
     return add_calendar(b, cfg)
 

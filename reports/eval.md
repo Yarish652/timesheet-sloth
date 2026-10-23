@@ -59,8 +59,8 @@ Leakage check over 54 feature columns: PASS: no feature is the block's category,
 _Updated 2026-10-23 02:04._
 <!-- /label:real data, starter rules off -->
 
-<!-- forecast:real data, starter rules on -->
-## Focus forecast backtest (real data, starter rules on)
+<!-- forecast:real data, starter rules on, focus=switches<=6 -->
+## Focus forecast backtest (real data, starter rules on, focus=switches<=6)
 
 Rolling origin over the last 14 complete days: each test day is predicted by a model trained only on blocks before that day's 00:00. Focus = minutes in Work categories within blocks with <= 6 app switches. Mean actual focus 0.40 h/day. Runtime 910 s.
 
@@ -95,10 +95,10 @@ TabPFN 80% predictive interval (10%-90% quantiles) covered 92.7% of blocks.
 </details>
 
 _Updated 2026-10-23 13:22._
-<!-- /forecast:real data, starter rules on -->
+<!-- /forecast:real data, starter rules on, focus=switches<=6 -->
 
-<!-- forecast:synthetic data, starter rules off -->
-## Focus forecast backtest (synthetic data, starter rules off)
+<!-- forecast:synthetic data, starter rules off, focus=switches<=6 -->
+## Focus forecast backtest (synthetic data, starter rules off, focus=switches<=6)
 
 Rolling origin over the last 14 complete days: each test day is predicted by a model trained only on blocks before that day's 00:00. Focus = minutes in Work categories within blocks with <= 6 app switches. Mean actual focus 1.46 h/day. Runtime 177 s.
 
@@ -133,4 +133,130 @@ TabPFN 80% predictive interval (10%-90% quantiles) covered 91.2% of blocks.
 </details>
 
 _Updated 2026-10-23 13:25._
-<!-- /forecast:synthetic data, starter rules off -->
+<!-- /forecast:synthetic data, starter rules off, focus=switches<=6 -->
+
+<!-- focus-definition:real data, starter rules on -->
+## Focus definition sensitivity (real data, starter rules on)
+
+How much of the time in work categories counts as focus under each rule. `switches` is the original M1-M3 rule (any app change). `shifts` counts only moves from work to a known non-work category (RescueTime-style), so editor <-> docs/AI chat is free and Uncategorized is neutral. 82 active days.
+
+| rule | focus h/day (median) | focus h/day (mean) | % of work kept |
+|---|---|---|---|
+| switches <= 0 | 0.000 | 0.069 | 8% |
+| switches <= 2 | 0.011 | 0.170 | 19% |
+| switches <= 4 | 0.074 | 0.262 | 29% |
+| switches <= 6 | 0.118 | 0.310 | 34% |
+| switches <= 8 | 0.171 | 0.373 | 41% |
+| switches <= 10 | 0.239 | 0.407 | 45% |
+| shifts <= 0 | 0.401 | 0.652 | 72% |
+| shifts <= 1 | 0.532 | 0.753 | 83% |
+| shifts <= 2  (current) | 0.615 | 0.810 | 89% |
+| shifts <= 3 | 0.708 | 0.850 | 94% |
+| shifts <= 4 | 0.711 | 0.856 | 95% |
+| shifts <= 5 | 0.720 | 0.871 | 96% |
+| shifts <= 6 | 0.720 | 0.875 | 97% |
+| no rule (all work time) | 0.778 | 0.906 | 100% |
+
+_Updated 2026-10-24 00:37._
+<!-- /focus-definition:real data, starter rules on -->
+
+<!-- focus-definition:synthetic data, starter rules off -->
+## Focus definition sensitivity (synthetic data, starter rules off)
+
+How much of the time in work categories counts as focus under each rule. `switches` is the original M1-M3 rule (any app change). `shifts` counts only moves from work to a known non-work category (RescueTime-style), so editor <-> docs/AI chat is free and Uncategorized is neutral. 28 active days.
+
+| rule | focus h/day (median) | focus h/day (mean) | % of work kept |
+|---|---|---|---|
+| switches <= 0 | 0.000 | 0.094 | 4% |
+| switches <= 2 | 0.536 | 0.632 | 29% |
+| switches <= 4 | 1.118 | 1.131 | 52% |
+| switches <= 6 | 1.865 | 1.567 | 72% |
+| switches <= 8 | 2.371 | 1.889 | 86% |
+| switches <= 10 | 2.586 | 2.083 | 95% |
+| shifts <= 0 | 1.549 | 1.394 | 64% |
+| shifts <= 1 | 2.384 | 2.007 | 92% |
+| shifts <= 2  (current) | 2.712 | 2.167 | 99% |
+| shifts <= 3 | 2.761 | 2.178 | 100% |
+| shifts <= 4 | 2.761 | 2.185 | 100% |
+| shifts <= 5 | 2.761 | 2.185 | 100% |
+| shifts <= 6 | 2.761 | 2.185 | 100% |
+| no rule (all work time) | 2.761 | 2.185 | 100% |
+
+_Updated 2026-10-24 00:37._
+<!-- /focus-definition:synthetic data, starter rules off -->
+
+<!-- forecast:real data, starter rules on, focus=shifts<=2 -->
+## Focus forecast backtest (real data, starter rules on, focus=shifts<=2)
+
+Rolling origin over the last 14 complete days: each test day is predicted by a model trained only on blocks before that day's 00:00. Focus = minutes in Work within blocks with <= 2 shifts from work to non-work. Mean actual focus 0.93 h/day. Runtime 951 s.
+
+| method | block MAE (min) | daily-total MAE (h) | days best |
+|---|---|---|---|
+| TabPFN | 1.543 | 0.663 | 0 |
+| same as last week | 1.857 | 0.892 | 3 |
+| rolling 4-week average | 1.671 | 0.655 | 0 |
+| always zero | 1.164 | 0.931 | 13 |
+
+TabPFN 80% predictive interval (10%-90% quantiles) covered 88.8% of blocks.
+
+<details><summary>Per day</summary>
+
+| test day | trained on | actual h | TabPFN h | TabPFN MAE | last-week MAE | 4-wk MAE | zero MAE |
+|---|---|---|---|---|---|---|---|
+| 2026-10-09 | 2026-07-17..2026-10-08 | 1.615 | 0.412 | 2.257 | 2.796 | 2.421 | 2.018 |
+| 2026-10-10 | 2026-07-17..2026-10-09 | 2.481 | 0.449 | 3.503 | 3.180 | 3.888 | 3.102 |
+| 2026-10-11 | 2026-07-17..2026-10-10 | 2.147 | 0.424 | 3.002 | 2.683 | 3.169 | 2.683 |
+| 2026-10-12 | 2026-07-17..2026-10-11 | 0.725 | 0.483 | 1.347 | 0.906 | 1.304 | 0.906 |
+| 2026-10-13 | 2026-07-17..2026-10-12 | 0.692 | 0.488 | 1.322 | 1.441 | 1.326 | 0.865 |
+| 2026-10-14 | 2026-07-17..2026-10-13 | 0.015 | 0.366 | 0.438 | 0.099 | 0.154 | 0.019 |
+| 2026-10-15 | 2026-07-17..2026-10-14 | 0.007 | 0.522 | 0.644 | 1.554 | 1.422 | 0.009 |
+| 2026-10-16 | 2026-07-17..2026-10-15 | 1.447 | 0.348 | 2.039 | 3.352 | 2.347 | 1.808 |
+| 2026-10-17 | 2026-07-17..2026-10-16 | 0.790 | 0.447 | 1.423 | 2.419 | 1.068 | 0.987 |
+| 2026-10-18 | 2026-07-17..2026-10-17 | 0.854 | 0.404 | 1.390 | 3.207 | 1.696 | 1.068 |
+| 2026-10-19 | 2026-07-17..2026-10-18 | 0.592 | 0.360 | 1.067 | 1.645 | 0.967 | 0.741 |
+| 2026-10-20 | 2026-07-17..2026-10-19 | 0.428 | 0.424 | 0.844 | 1.168 | 1.118 | 0.535 |
+| 2026-10-21 | 2026-07-17..2026-10-20 | 0.945 | 0.329 | 1.294 | 1.161 | 1.277 | 1.181 |
+| 2026-10-22 | 2026-07-17..2026-10-21 | 0.301 | 0.567 | 1.025 | 0.386 | 1.230 | 0.377 |
+
+</details>
+
+_Updated 2026-10-24 00:55._
+<!-- /forecast:real data, starter rules on, focus=shifts<=2 -->
+
+<!-- forecast:synthetic data, starter rules off, focus=shifts<=2 -->
+## Focus forecast backtest (synthetic data, starter rules off, focus=shifts<=2)
+
+Rolling origin over the last 14 complete days: each test day is predicted by a model trained only on blocks before that day's 00:00. Focus = minutes in Work within blocks with <= 2 shifts from work to non-work. Mean actual focus 2.09 h/day. Runtime 185 s.
+
+| method | block MAE (min) | daily-total MAE (h) | days best |
+|---|---|---|---|
+| TabPFN | 3.090 | 0.867 | 0 |
+| same as last week | 3.194 | 0.889 | 3 |
+| rolling 4-week average | 3.112 | 0.767 | 2 |
+| always zero | 2.613 | 2.090 | 9 |
+
+TabPFN 80% predictive interval (10%-90% quantiles) covered 90.6% of blocks.
+
+<details><summary>Per day</summary>
+
+| test day | trained on | actual h | TabPFN h | TabPFN MAE | last-week MAE | 4-wk MAE | zero MAE |
+|---|---|---|---|---|---|---|---|
+| 2026-10-09 | 2026-09-25..2026-10-08 | 1.025 | 2.322 | 3.016 | 3.103 | 3.217 | 1.281 |
+| 2026-10-10 | 2026-09-25..2026-10-09 | 0.342 | 0.671 | 1.207 | 1.179 | 1.345 | 0.428 |
+| 2026-10-11 | 2026-09-25..2026-10-10 | 0.223 | 0.563 | 0.935 | 0.648 | 0.892 | 0.278 |
+| 2026-10-12 | 2026-09-25..2026-10-11 | 2.485 | 2.355 | 3.546 | 3.993 | 3.963 | 3.106 |
+| 2026-10-13 | 2026-09-25..2026-10-12 | 3.214 | 2.344 | 4.231 | 4.672 | 4.620 | 4.017 |
+| 2026-10-14 | 2026-09-25..2026-10-13 | 0.783 | 2.269 | 2.850 | 3.256 | 2.639 | 0.979 |
+| 2026-10-15 | 2026-09-25..2026-10-14 | 3.200 | 2.378 | 4.097 | 3.796 | 3.873 | 4.000 |
+| 2026-10-16 | 2026-09-25..2026-10-15 | 3.060 | 1.581 | 3.506 | 3.247 | 3.295 | 3.825 |
+| 2026-10-17 | 2026-09-25..2026-10-16 | 0.000 | 0.627 | 0.784 | 0.428 | 0.754 | 0.000 |
+| 2026-10-18 | 2026-09-25..2026-10-17 | 1.046 | 0.640 | 1.757 | 1.029 | 1.624 | 1.307 |
+| 2026-10-19 | 2026-09-25..2026-10-18 | 3.385 | 2.661 | 4.359 | 4.761 | 4.688 | 4.231 |
+| 2026-10-20 | 2026-09-25..2026-10-19 | 3.106 | 2.485 | 3.433 | 4.832 | 3.432 | 3.883 |
+| 2026-10-21 | 2026-09-25..2026-10-20 | 3.303 | 1.846 | 4.168 | 4.026 | 3.695 | 4.129 |
+| 2026-10-22 | 2026-09-25..2026-10-21 | 4.096 | 2.546 | 5.364 | 5.748 | 5.530 | 5.120 |
+
+</details>
+
+_Updated 2026-10-24 00:58._
+<!-- /forecast:synthetic data, starter rules off, focus=shifts<=2 -->

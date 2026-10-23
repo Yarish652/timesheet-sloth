@@ -207,3 +207,39 @@ patch that tried to match a "·" failed (the file round-tripped fine, the match 
 pass `encoding="utf-8"`. Rich wrapped the date columns into unreadable stubs at 80 columns; it
 now uses `MM-DD` and `no_wrap`. TabPFN prints "Consider using a GPU…" on every CPU fit; the CLI
 filters that one UserWarning.
+
+## Focus definition change (2026-10-24, after M3's eval)
+
+**Why.** M3's rule ("≤ 6 app switches per 30-min block") threw away 66% of real work minutes. The
+real workflow is VS Code ⇄ Chrome (docs, ChatGPT, Claude), and every one of those switches
+counted as distraction. Two looks at prior art: **RescueTime** counts a "shift" only when you go
+from work to communication or personal activity, and **Brown et al. 2023** (Google,
+arXiv 2304.04711) detect focus as runs of *related* events, not few app changes. Rize counts raw
+switches and reports one every ~35 s, which shows how noisy that measure is.
+
+**New rule (default `focus_rule = "shifts"`, `focus_max_shifts = 2`).** A block's work minutes
+count as focus if it has at most 2 shifts from a work category to a known non-work category.
+Work-to-work switching is free; Uncategorized and away time are neutral (skipped), so
+work → ? → YouTube still counts as one shift. The old rule stays available as
+`focus_rule = "switches"`.
+
+**This changed after seeing results, so both are reported.** `sloth eval focus-definition`
+prints the sensitivity table, now in eval.md. Real data:
+switches ≤ 6 keeps 34% of work minutes (median 0.12 focus h/day); shifts ≤ 2 keeps 89% (median
+0.61 h/day); all work time is 0.78 h/day. The curve flattens past 2–3 shifts (94–97%), so the
+threshold isn't doing much work.
+
+**Forecast re-measured (real, 14-day rolling origin, mean focus now 0.93 h/day):**
+- block MAE: always-zero 1.16 < TabPFN 1.54 < 4-week 1.67 < last week 1.86. Zero still wins
+  13/14 days.
+- daily-total MAE: 4-week mean **0.65** ≈ TabPFN 0.66 < last week 0.89 < zero 0.93. With the
+  old rule TabPFN was best on daily totals (0.32 vs 0.40–0.60); **with the new rule it's a tie
+  with the 4-week mean, not a win.**
+- 80% interval coverage 88.8%: still too wide, less so than before (92.7%).
+- Synthetic: block MAE zero 2.61 < TabPFN 3.09 ≈ 4-week 3.11; daily-total 4-week 0.77 < TabPFN
+  0.87 < last week 0.89.
+- Runtime 951 s real / 185 s synthetic.
+
+**Reading.** A fairer focus measure doesn't rescue block-level forecasting: the user's focus
+still isn't on a schedule. That's the case for M4's switch from "predict when" to "which
+starting conditions lead to focus".

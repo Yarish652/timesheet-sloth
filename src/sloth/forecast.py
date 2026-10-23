@@ -41,9 +41,7 @@ def extend_to(blocks: pd.DataFrame, day: dt.date, cfg: Config) -> pd.DataFrame:
     new = pd.date_range(last + step, end, freq=step, inclusive="left")
     if len(new) == 0:
         return blocks
-    future = pd.DataFrame(
-        {"block_start": new, "active_min": np.nan, "focus_min": np.nan, "category": features.AFK}
-    )
+    future = pd.DataFrame({"block_start": new, "active_min": np.nan, "focus_min": np.nan, "category": features.AFK})
     keep = blocks.drop(columns=[c for c in blocks.columns if c.startswith(_LAG_COLUMNS)])
     return features.add_calendar(pd.concat([keep, future], ignore_index=True), cfg)
 
@@ -150,9 +148,7 @@ def plan(fc: pd.DataFrame, history: pd.DataFrame, cfg: Config, top: int = 3) -> 
             continue
         taken.append(start)
         end = start + pd.Timedelta(minutes=cfg.block_minutes * span)
-        windows.append(
-            {"start": f"{start:%H:%M}", "end": f"{end:%H:%M}", "expected_focus_min": round(float(roll[i]))}
-        )
+        windows.append({"start": f"{start:%H:%M}", "end": f"{end:%H:%M}", "expected_focus_min": round(float(roll[i]))})
     return {
         "date": str(fc["date"].iloc[0]),
         "predicted_focus_hours": round(total_h, 2),

@@ -67,9 +67,7 @@ def test_feature_matrix_is_numeric_and_passes_leakage_check(blocks: pd.DataFrame
     assert all(not c.startswith("tok_") or c[4:].isdigit() for c in m.columns)  # no words in names
 
 
-@pytest.mark.parametrize(
-    "bad", ["category", "known_category", "true_category", "title", "url", "rule_category"]
-)
+@pytest.mark.parametrize("bad", ["category", "known_category", "true_category", "title", "url", "rule_category"])
 def test_leakage_check_flags_label_columns(bad: str) -> None:
     assert label.leakage_check([*label.NUMERIC, bad])
 

@@ -11,9 +11,7 @@ from rich.table import Table
 
 from sloth import config, netguard
 
-app = typer.Typer(
-    help="Timesheet Sloth: your ActivityWatch history, summarised locally.", no_args_is_help=True
-)
+app = typer.Typer(help="Timesheet Sloth: your ActivityWatch history, summarised locally.", no_args_is_help=True)
 eval_app = typer.Typer(help="Evaluate the TabPFN models against baselines.", no_args_is_help=True)
 app.add_typer(eval_app, name="eval")
 console = Console()
@@ -58,9 +56,7 @@ def synth(
 
     ev = synthetic.write(out, days=days, seed=seed)
     n_blocks = len(pd.read_csv(out / "blocks.csv"))
-    console.print(
-        f"Wrote {out / 'events.csv'} ({len(ev):,} events) and {out / 'blocks.csv'} ({n_blocks:,} blocks)"
-    )
+    console.print(f"Wrote {out / 'events.csv'} ({len(ev):,} events) and {out / 'blocks.csv'} ({n_blocks:,} blocks)")
 
     hours = ev.groupby("category")["duration_s"].sum().sort_values(ascending=False) / 3600
     t = Table(title="Hours per category")
@@ -70,15 +66,10 @@ def synth(
     for cat, h in hours.items():
         t.add_row(str(cat), f"{h:.1f}", f"{h / hours.sum():.1%}")
     console.print(t)
-    console.print(
-        f"Uncategorized: [bold]{hours.get(synthetic.UNCATEGORIZED, 0) / hours.sum():.1%}[/] of active time"
-    )
+    console.print(f"Uncategorized: [bold]{hours.get(synthetic.UNCATEGORIZED, 0) / hours.sum():.1%}[/] of active time")
 
     local = pd.to_datetime(ev["start"], utc=True).dt.tz_convert(config.load().timezone)
-    per_day = (
-        ev.assign(date=local.dt.date, wd=local.dt.day_name()).groupby(["date", "wd"])["duration_s"].sum()
-        / 3600
-    )
+    per_day = ev.assign(date=local.dt.date, wd=local.dt.day_name()).groupby(["date", "wd"])["duration_s"].sum() / 3600
     by_wd = per_day.groupby(level="wd").mean()
     order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     w = Table(title="Mean active hours per weekday")
@@ -101,6 +92,13 @@ def _use_starter(d: Path, flag: bool | None) -> bool:
     from sloth import data as data_mod
 
     return (not data_mod.is_synthetic(d)) if flag is None else flag
+
+
+def _focus_desc(cfg: config.Config) -> str:
+    cats = ", ".join(cfg.work_categories)
+    if cfg.focus_rule == "shifts":
+        return f"minutes in {cats} within blocks with <= {cfg.focus_max_shifts} shifts from work to non-work"
+    return f"minutes in {cats} within blocks with <= {cfg.focus_max_switches} app switches"
 
 
 _STARTER_HELP = "Apply sloth's starter rules first (default: on for real data, off for synthetic)."
@@ -233,9 +231,7 @@ def eval_label(
     ]
     truth = label_mod.evaluate_truth(blocks, cfg)
     if truth:
-        console.print(
-            _score_table("Uncategorized blocks vs hidden true category (synthetic only)", truth["rows"])
-        )
+        console.print(_score_table("Uncategorized blocks vs hidden true category (synthetic only)", truth["rows"]))
         md += [
             "Uncategorized blocks scored against the generator's hidden true category (the case that "
             "matters: time the rules missed).",
@@ -268,6 +264,79 @@ def eval_label(
     console.print(f"[dim]Saved to {path}[/]")
 
 
+@eval_app.command("focus-definition")
+def eval_focus_definition(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
+) -> None:
+    """How much work time counts as focus under each rule and threshold (aggregates only)."""
+    from sloth import data as data_mod
+    from sloth import features, report
+
+    cfg = config.load()
+    d = _data_dir(data)
+    use_starter = _use_starter(d, starter_rules)
+    kind = "synthetic" if data_mod.is_synthetic(d) else "real"
+    name = f"{kind} data, starter rules {'on' if use_starter else 'off'}"
+    blocks = data_mod.load_blocks(d, cfg, starter_rules=use_starter)
+    active_days = blocks.groupby("date")["active_min"].sum()
+    days = active_days[active_days > 0].index
+    work_total = blocks["work_min"].sum()
+
+    rows = []
+    for rule, limits in (("switches", range(0, 11, 2)), ("shifts", range(0, 7))):
+        for k in limits:
+            rcfg = config.Config(**{**cfg.__dict__, "focus_rule": rule, f"focus_max_{rule}": k})
+            ok = [
+                features.passes_focus_rule(sw, sh, rcfg)
+                for sw, sh in zip(blocks["n_switches"], blocks["n_shifts"], strict=True)
+            ]
+            focus = blocks["work_min"].where(ok, 0.0)
+            per_day = focus.groupby(blocks["date"]).sum().reindex(days).fillna(0) / 60
+            current = rule == cfg.focus_rule and k == getattr(cfg, f"focus_max_{rule}")
+            rows.append(
+                {
+                    "rule": f"{rule} <= {k}" + ("  (current)" if current else ""),
+                    "median_h": float(per_day.median()),
+                    "mean_h": float(per_day.mean()),
+                    "kept": float(focus.sum() / work_total) if work_total else 0.0,
+                }
+            )
+    rows.append(
+        {
+            "rule": "no rule (all work time)",
+            "median_h": float((blocks.groupby("date")["work_min"].sum().reindex(days) / 60).median()),
+            "mean_h": float(blocks["work_min"].sum() / 60 / len(days)),
+            "kept": 1.0,
+        }
+    )
+    t = Table(title=f"Focus definition sensitivity ({name}, {len(days)} active days)")
+    for col in ("rule", "focus h/day (median)", "focus h/day (mean)", "% of work kept"):
+        t.add_column(col, justify="left" if col == "rule" else "right")
+    for r in rows:
+        t.add_row(r["rule"], f"{r['median_h']:.2f}", f"{r['mean_h']:.2f}", f"{r['kept']:.0%}")
+    console.print(t)
+    md_rows = [{**r, "kept": f"{r['kept']:.0%}"} for r in rows]
+    path = report.update_section(
+        f"focus-definition:{name}",
+        f"## Focus definition sensitivity ({name})\n\n"
+        "How much of the time in work categories counts as focus under each rule. `switches` is the "
+        "original M1-M3 rule (any app change). `shifts` counts only moves from work to a known "
+        "non-work category (RescueTime-style), so editor <-> docs/AI chat is free and Uncategorized "
+        f"is neutral. {len(days)} active days.\n\n"
+        + report.table(
+            md_rows,
+            [
+                ("rule", "rule"),
+                ("median_h", "focus h/day (median)"),
+                ("mean_h", "focus h/day (mean)"),
+                ("kept", "% of work kept"),
+            ],
+        ),
+    )
+    console.print(f"[dim]Saved to {path}[/]")
+
+
 @eval_app.command("forecast")
 def eval_forecast(
     data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
@@ -282,12 +351,10 @@ def eval_forecast(
     d = _data_dir(data)
     use_starter = _use_starter(d, starter_rules)
     kind = "synthetic" if data_mod.is_synthetic(d) else "real"
-    name = f"{kind} data, starter rules {'on' if use_starter else 'off'}"
+    limit = getattr(cfg, f"focus_max_{cfg.focus_rule}")
+    name = f"{kind} data, starter rules {'on' if use_starter else 'off'}, focus={cfg.focus_rule}<={limit}"
     blocks = data_mod.load_blocks(d, cfg, starter_rules=use_starter)
-    console.print(
-        f"Data: {d} ({name}). Focus = minutes in {cfg.work_categories} within blocks with "
-        f"<= {cfg.focus_max_switches} app switches."
-    )
+    console.print(f"Data: {d} ({name}). Focus = {_focus_desc(cfg)}.")
     console.print(f"Backtesting {backtest_days} days, one TabPFN fit per day (rolling origin)...")
     res = forecast.backtest(blocks, cfg, days=backtest_days)
 
@@ -308,9 +375,7 @@ def eval_forecast(
             "method": m,
             "block_mae": res["block_mae_min"][m],
             "daily_mae": res["daily_mae_hours"][m],
-            "days_won": sum(
-                r[f"{m} mae"] <= min(r[f"{o} mae"] for o in forecast.METHODS) for r in res["per_day"]
-            ),
+            "days_won": sum(r[f"{m} mae"] <= min(r[f"{o} mae"] for o in forecast.METHODS) for r in res["per_day"]),
         }
         for m in forecast.METHODS
     ]
@@ -347,9 +412,8 @@ def eval_forecast(
         [
             f"## Focus forecast backtest ({name})",
             f"Rolling origin over the last {len(res['per_day'])} complete days: each test day is predicted "
-            "by a model trained only on blocks before that day's 00:00. Focus = minutes in "
-            f"{', '.join(cfg.work_categories)} categories within blocks with <= {cfg.focus_max_switches} "
-            f"app switches. Mean actual focus {res['mean_daily_focus_hours']:.2f} h/day. Runtime "
+            f"by a model trained only on blocks before that day's 00:00. Focus = {_focus_desc(cfg)}. "
+            f"Mean actual focus {res['mean_daily_focus_hours']:.2f} h/day. Runtime "
             f"{res['seconds']:.0f} s.",
             report.table(
                 summary,
@@ -360,8 +424,7 @@ def eval_forecast(
                     ("days_won", "days best"),
                 ],
             ),
-            f"TabPFN 80% predictive interval (10%-90% quantiles) covered {res['interval_80_coverage']:.1%} "
-            "of blocks.",
+            f"TabPFN 80% predictive interval (10%-90% quantiles) covered {res['interval_80_coverage']:.1%} of blocks.",
             "<details><summary>Per day</summary>\n\n"
             + report.table(
                 per_day_md,
@@ -398,9 +461,7 @@ def plan_tomorrow(
     blocks = data_mod.load_blocks(d, cfg, starter_rules=_use_starter(d, starter_rules))
     fc = forecast.forecast_day(blocks, cfg)
     tr_from, tr_to = fc.attrs["train_dates"]
-    t = Table(
-        title=f"Raw forecast for {fc['date'].iloc[0]} (focus min per block; trained on {tr_from}..{tr_to})"
-    )
+    t = Table(title=f"Raw forecast for {fc['date'].iloc[0]} (focus min per block; trained on {tr_from}..{tr_to})")
     for col in ("block", "mean", "10%", "50%", "90%", ""):
         t.add_column(col, justify="left" if col in ("block", "") else "right")
     for r in fc.itertuples():

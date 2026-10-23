@@ -264,8 +264,7 @@ def main(argv=None):
     ap.add_argument(
         "--categories",
         default=None,
-        help="web UI category export JSON, used when the server has no rules "
-        "(default: <out>/categories.json)",
+        help="web UI category export JSON, used when the server has no rules (default: <out>/categories.json)",
     )
     a = ap.parse_args(argv)
     base = a.url.rstrip("/")

@@ -21,9 +21,18 @@ class Config:
     timezone: str = "Asia/Kolkata"
     block_minutes: int = 30
     # Focus minutes: active minutes in these categories (prefix match on "A > B" paths), counted
-    # only in blocks with at most `focus_max_switches` app switches.
+    # only in blocks that pass the focus rule:
+    # - "shifts" (default, RescueTime-style): at most `focus_max_shifts` shifts from work to a known
+    #   non-work category. Work-to-work switching (editor <-> docs) and Uncategorized time are free.
+    # - "switches" (the original M1-M3 rule): at most `focus_max_switches` app changes of any kind.
     work_categories: list[str] = field(default_factory=lambda: ["Work"])
+    focus_rule: str = "shifts"
+    focus_max_shifts: int = 2
     focus_max_switches: int = 6
+    # Sessions: a gap this long (AFK-filtered) starts a new session; a session with at least
+    # `focus_session_min` focus minutes counts as focused.
+    session_gap_min: int = 15
+    focus_session_min: int = 25
     # TabPFN on CPU handles about this many training rows comfortably.
     max_train_rows: int = 5000
     tabpfn_version: str = "v3.5-fast"

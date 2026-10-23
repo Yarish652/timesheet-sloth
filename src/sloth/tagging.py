@@ -74,9 +74,7 @@ def run(
         g = pieces[pieces["block_start"] == row.block_start]
         apps = g.groupby("app")["seconds"].sum().sort_values(ascending=False) / 60
         titles = g.groupby("title")["seconds"].sum().sort_values(ascending=False).head(5)
-        t = Table(
-            title=f"[{i}/{len(todo)}] {row.block_start:%a %d %b %H:%M} · {row.active_min:.0f} active min"
-        )
+        t = Table(title=f"[{i}/{len(todo)}] {row.block_start:%a %d %b %H:%M} · {row.active_min:.0f} active min")
         t.add_column("app")
         t.add_column("min", justify="right")
         for app, m in apps.head(4).items():

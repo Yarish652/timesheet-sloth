@@ -30,10 +30,7 @@ def test_synthetic_is_deterministic() -> None:
 
 
 def test_synthetic_uncategorized_share_is_about_30_percent(events: pd.DataFrame) -> None:
-    share = (
-        events.loc[events["category"] == synthetic.UNCATEGORIZED, "duration_s"].sum()
-        / events["duration_s"].sum()
-    )
+    share = events.loc[events["category"] == synthetic.UNCATEGORIZED, "duration_s"].sum() / events["duration_s"].sum()
     assert 0.2 <= share <= 0.4
 
 
@@ -114,6 +111,7 @@ def test_blocks_keep_every_active_minute(events: pd.DataFrame) -> None:
 
 
 def test_focus_minutes_need_low_switching() -> None:
+    """The original M1-M3 rule, now selected explicitly with focus_rule="switches"."""
     t = dt.datetime(2026, 10, 1, 10, 0, tzinfo=IST)
     rows = []
     for i in range(10):  # 10 alternating 2-minute events: 9 switches
@@ -124,9 +122,51 @@ def test_focus_minutes_need_low_switching() -> None:
         )  # fmt: skip
     ev = pd.DataFrame(rows)
     block = lambda cfg: features.build_blocks(ev, cfg).query("active_min > 0").iloc[0]  # noqa: E731
-    assert block(Config(focus_max_switches=6))["focus_min"] == 0
-    loose = block(Config(focus_max_switches=20))
+    assert block(Config(focus_rule="switches", focus_max_switches=6))["focus_min"] == 0
+    loose = block(Config(focus_rule="switches", focus_max_switches=20))
     assert loose["focus_min"] == pytest.approx(10) and loose["n_switches"] == 9
+
+
+def _block_of(sequence: list[tuple[str, str]], cfg: Config) -> pd.Series:
+    """One block from (app, category) events of 2 minutes each, starting 10:00."""
+    t = dt.datetime(2026, 10, 1, 10, 0, tzinfo=IST)
+    rows = [
+        {"start": t + dt.timedelta(minutes=2 * i), "duration_s": 120.0, "app": app, "title": "", "url": "",
+         "category": cat}
+        for i, (app, cat) in enumerate(sequence)
+    ]  # fmt: skip
+    return features.build_blocks(pd.DataFrame(rows), cfg).query("active_min > 0").iloc[0]
+
+
+CODE = ("Code.exe", "Work > Programming")
+DOCS = ("chrome.exe", "Work")
+VIDEO = ("chrome.exe", "Media > Video")
+MYSTERY = ("mystery.exe", "Uncategorized")
+
+
+def test_focus_shifts_ignore_work_to_work_switching() -> None:
+    b = _block_of([CODE, DOCS] * 5, Config(focus_rule="shifts", focus_max_shifts=2))
+    assert b["n_switches"] == 9 and b["n_shifts"] == 0
+    assert b["focus_min"] == pytest.approx(20)  # all of it counts; the old rule would give 0
+
+
+def test_focus_shifts_count_work_to_media() -> None:
+    seq = [CODE, VIDEO, CODE, VIDEO, CODE, VIDEO, CODE]
+    b = _block_of(seq, Config(focus_rule="shifts", focus_max_shifts=2))
+    assert b["n_shifts"] == 3 and b["focus_min"] == 0
+    assert _block_of(seq, Config(focus_rule="shifts", focus_max_shifts=3))["focus_min"] == pytest.approx(8)
+
+
+def test_uncategorized_is_neutral() -> None:
+    cfg = Config(focus_rule="shifts", focus_max_shifts=0)
+    assert _block_of([CODE, MYSTERY, CODE, MYSTERY, CODE], cfg)["n_shifts"] == 0
+    assert _block_of([CODE, MYSTERY, VIDEO], cfg)["n_shifts"] == 1  # work -> ? -> video is a shift
+    assert features.count_shifts([VIDEO[1], CODE[1]], cfg) == 0  # non-work -> work is not a shift
+
+
+def test_unknown_focus_rule_fails_loudly() -> None:
+    with pytest.raises(ValueError):
+        features.passes_focus_rule(0, 0, Config(focus_rule="vibes"))
 
 
 def test_tokens_drop_stopwords_and_keep_domain() -> None:

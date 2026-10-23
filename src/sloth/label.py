@@ -55,9 +55,7 @@ class Matrix:
     cat_idx: list[int] = field(default_factory=list)
 
 
-def make_xy(
-    train: pd.DataFrame, *others: pd.DataFrame, vocab_size: int = 40
-) -> tuple[Matrix, list[np.ndarray]]:
+def make_xy(train: pd.DataFrame, *others: pd.DataFrame, vocab_size: int = 40) -> tuple[Matrix, list[np.ndarray]]:
     """Feature matrices for train and other frames, with categoricals encoded on train."""
     m = Matrix(vocab=features.vocabulary(train, size=vocab_size))
     frames = (train, *others)
@@ -79,9 +77,7 @@ def leakage_check(columns: list[str]) -> list[str]:
     """Return the problems with a feature list (empty means clean)."""
     problems = [f"{c} is a forbidden column" for c in columns if c in FORBIDDEN]
     allowed = set(NUMERIC) | set(CATEGORICAL)
-    problems += [
-        f"{c} is not a known feature" for c in columns if c not in allowed and not c.startswith("tok_")
-    ]
+    problems += [f"{c} is not a known feature" for c in columns if c not in allowed and not c.startswith("tok_")]
     return problems
 
 
@@ -137,9 +133,7 @@ def split_blocks(blocks: pd.DataFrame, hand: pd.Series) -> tuple[pd.DataFrame, p
 # --- Evaluation ---------------------------------------------------------------------------
 
 
-def _baselines(
-    train: pd.DataFrame, y_train: pd.Series, test: pd.DataFrame
-) -> dict[str, tuple[np.ndarray, float]]:
+def _baselines(train: pd.DataFrame, y_train: pd.Series, test: pd.DataFrame) -> dict[str, tuple[np.ndarray, float]]:
     out = {}
     t = time.perf_counter()
     majority = y_train.mode().iloc[0]
