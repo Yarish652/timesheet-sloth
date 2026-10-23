@@ -243,3 +243,67 @@ threshold isn't doing much work.
 **Reading.** A fairer focus measure doesn't rescue block-level forecasting: the user's focus
 still isn't on a schedule. That's the case for M4's switch from "predict when" to "which
 starting conditions lead to focus".
+
+## M4: sessions, focus conditions, Gemma agent (2026-10-24, in progress)
+
+**Sessions.** A gap of 15+ min (AFK-filtered) starts a new session; "focused" = ≥ 25 focus minutes
+(a Pomodoro). Real data: 295 sessions, 19% focused. Synthetic: 200, 28%.
+
+**Two leaks caught before any number was trusted.**
+1. A session's focus was first computed from whole 30-min blocks, and a block can hold the end of
+   one session and the start of the next. Now the focus rule is applied per (session, block).
+2. `starter_family` ("how did it start") took the first categorized event from *anywhere* in the
+   session. "Started with Uncategorized" then meant "no categorized time at all", so it was 0% of
+   101 sessions by construction. The scrambling test missed it because scrambling categories
+   rarely flips that edge case. Now it's the first 10 minutes only, with a regression test and a
+   test that scrambles everything after minute 10 and asserts starter_family doesn't move. After
+   the fix: 3% of 127 sessions, low but not zero by definition.
+
+**Focus conditions: TabPFN does beat both baselines here.** P(session becomes focused | start
+context), time-based holdout (last 14 days):
+- Real: ROC-AUC **0.747** vs rate-by-start-hour 0.516, base rate 0.500; Brier 0.119 vs 0.127 / 0.126;
+  log-loss 0.387 vs 0.425 / 0.421. 239 train / 56 test sessions, but only ~8 positives in test
+  (14% focused), so the AUC is noisy. Calibration gains are small.
+- Synthetic: AUC 0.804 vs 0.700 / 0.500; Brier 0.180 vs 0.198 / 0.228.
+- First time in this project TabPFN clearly wins: it's the right question for the data.
+
+**The real suggestion is partly circular.** "In the evening, start with Work instead of an
+Uncategorized app: 7% → 44% (39 sessions)." Starting with work means you're already working.
+It's still actionable for the lazy version ("open VS Code before Chrome"), but it isn't a deep
+insight, and it's correlational. Real routine score 0.33 → "design mode"; synthetic 0.57 → routine.
+
+**TabPFN is slow on tiny tables with categoricals.** 239 rows × 9 features: fit 22 s, predict
+30–41 s even for 10 rows. Synthetic check: auto n_estimators resolves to 4. Declaring the 3
+categorical columns roughly doubles predict time (37 s vs 15 s). Kept them declared because
+they *are* categories.
+
+**`build_sessions` was 8 s per call** (thousands of small pandas lookups); grouped aggregations
+bring it to 0.7 s with identical output. The test file went from 254 s to ~70 s.
+
+**Gemma, first real runs (CPU, 13.8 GB RAM, ~1.3 GB free).**
+- `standup --date 2026-10-21 --trace`: 2 tool calls (day_summary, focus_conditions), 3 LLM calls,
+  474 s of LLM (first call 240 s, 124 s of it model load; then 52 s; then 182 s for 154 output
+  tokens), **13 min 43 s total**. Number check passed. Prose used only tool numbers, said
+  "tends to" for the suggestion.
+- `timesheet --week --trace`: 2 tool calls, 2 LLM calls, 553 s. Load 113 s (reload after the context
+  change), then 392 tokens in 326 s (~1.2 tok/s vs ~7 tok/s in the first standalone test).
+- **The number checker flagged "5.3"**, and the bug was in the checker: the tool said 5.25, Gemma
+  rounded half-up, and the checker used Python's round-half-to-even (5.2). Now it accepts any
+  number within half a unit of the prose's precision (5.25 → 5.3 or 5.2 ok; 5.4 flagged).
+- Memory: Gemma 4's default context is 131,072 tokens; capped at `llm_num_ctx = 8192`. A
+  3.6 GB `java` process (not ours) plus Gemma (3.2 GB) plus TabPFN left ~1.3 GB free.
+- **`plan-tomorrow` was killed by Claude Code's low-memory safeguard** mid-TabPFN, while Gemma sat
+  in RAM from the previous command (`keep_alive` 30 m, my change). Fix: TabPFN-backed tools are
+  prefetched and cached *before* the first LLM call, and `keep_alive` is now 2 m, so the two
+  models don't share RAM within or across commands.
+
+**Dashboard comparison caveat.** ActivityWatch's web UI starts the day at 04:00 by default; sloth
+uses midnight. On 2026-10-21 (first activity 00:03) that's 4.14 h (sloth) vs 2.10 h (04:00
+boundary). Candidate fix: a `day_start_hour` setting; not done because it shifts every date-based
+number from M2/M3.
+
+**Privacy path.** Tools return aggregates (category names, exe names, counts). The only place a
+tool result enters the message list is `agent._tool_message`, which serialises through
+`privacy.Guard.check`. That raises (without echoing the match) if any title ≥ 6 chars (single plain
+words need ≥ 12) or URL/host from the data appears. A canary test plants `SECRET-CANARY-7f3a` in
+titles and URLs and asserts that no tool output contains it, and that the guard blocks it.

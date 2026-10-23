@@ -18,6 +18,11 @@ class Config:
     aw_url: str = "http://localhost:5600"
     ollama_url: str = "http://localhost:11434"
     llm_model: str = "gemma4:e4b"
+    # Gemma 4 defaults to a 128k context; Ollama reserves memory for it. Our prompts are ~2k tokens.
+    llm_num_ctx: int = 8192
+    # Long enough for the tool rounds of one command, short enough that the next command's TabPFN
+    # work doesn't share 16 GB with a resident Gemma (that ran the machine out of memory once).
+    llm_keep_alive: str = "2m"
     timezone: str = "Asia/Kolkata"
     block_minutes: int = 30
     # Focus minutes: active minutes in these categories (prefix match on "A > B" paths), counted

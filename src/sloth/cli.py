@@ -17,11 +17,6 @@ app.add_typer(eval_app, name="eval")
 console = Console()
 
 
-def _todo(milestone: str) -> None:
-    console.print(f"[yellow]Not implemented yet[/] (lands in {milestone}).")
-    raise typer.Exit(2)
-
-
 @app.callback()
 def _main(ctx: typer.Context) -> None:
     config.load_dotenv()
@@ -446,20 +441,168 @@ def eval_forecast(
     console.print(f"[dim]Saved to {path}[/]")
 
 
+@eval_app.command("conditions")
+def eval_conditions(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
+    holdout_days: int = typer.Option(14, help="Days at the end held out for testing."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
+) -> None:
+    """Does TabPFN know which session starts lead to focus? Holdout vs base-rate baselines."""
+    from sloth import conditions, report, tools
+
+    cfg = config.load()
+    d = _data_dir(data)
+    use_starter = _use_starter(d, starter_rules)
+    ctx = tools.Context(d, cfg, use_starter)
+    kind = "synthetic" if "true_category" in ctx.events.columns else "real"
+    limit = getattr(cfg, f"focus_max_{cfg.focus_rule}")
+    name = f"{kind} data, starter rules {'on' if use_starter else 'off'}, focus={cfg.focus_rule}<={limit}"
+    s = ctx.sessions
+    console.print(
+        f"Data: {d} ({name}). {len(s)} sessions (gap >= {cfg.session_gap_min} min); focused = "
+        f">= {cfg.focus_session_min} focus min; {s['focused'].mean():.0%} of sessions focused."
+    )
+    res = conditions.evaluate(s, cfg, holdout_days)
+    console.print(
+        f"Train {res['train_dates'][0]}..{res['train_dates'][1]}, test {res['test_dates'][0]}.."
+        f"{res['test_dates'][1]} (focused rate train {res['focused_rate_train']:.0%}, "
+        f"test {res['focused_rate_test']:.0%})"
+    )
+    t = Table(title="P(session becomes focused | how it starts): holdout")
+    cols = [("method", "method"), ("auc", "ROC-AUC (higher)"), ("brier", "Brier (lower)"),
+            ("log_loss", "log-loss (lower)"), ("n_train", "n_train"), ("n_test", "n_test"),
+            ("seconds", "fit+predict s")]  # fmt: skip
+    for _, h in cols:
+        t.add_column(h, justify="left" if h == "method" else "right")
+    for r in res["rows"]:
+        t.add_row(*(f"{r[k]:.3f}" if isinstance(r[k], float) else str(r[k]) for k, _ in cols))
+    console.print(t)
+
+    ins = conditions.insights(s)
+    it = Table(title=f"Observed focus rates (only conditions seen >= {conditions.MIN_N} times)")
+    for h in ("condition", "sessions", "focused", "rate", "90% interval"):
+        it.add_column(h, justify="left" if h == "condition" else "right")
+    for r in ins:
+        it.add_row(r["condition"], str(r["sessions"]), str(r["focused"]), f"{r['rate']:.0%}",
+                   f"{r['low']:.0%}-{r['high']:.0%}")  # fmt: skip
+    console.print(it)
+
+    wi = conditions.what_if(s, cfg)
+    score = conditions.routine_score(ctx.blocks)
+    console.print(f"Routine score {score:.2f} -> {conditions.mode(ctx.blocks)} mode")
+    if wi["suggestion"]:
+        sg = wi["suggestion"]
+        console.print(
+            f"Suggestion: {sg['change']} (P focused {sg['p_usual']:.0%} -> {sg['p_suggested']:.0%}, "
+            f"seen {sg['sessions_seen']} times)"
+        )
+    else:
+        console.print(f"No suggestion: {wi['reason']}")
+
+    feats = conditions.feature_columns()
+    from sloth.sessions import START_CATEGORICAL, START_FEATURES
+
+    bad = [c for c in feats if c not in START_FEATURES + START_CATEGORICAL]
+    leak = "PASS: features are start-time context only" if not bad else f"FAIL: {bad}"
+    console.print(f"LEAKAGE CHECK: {', '.join(feats)} -> {leak}")
+
+    md = [
+        f"## Focus conditions ({name})",
+        f"{len(s)} sessions (a gap of {cfg.session_gap_min}+ min starts a new one); a session is focused with "
+        f">= {cfg.focus_session_min} focus minutes ({s['focused'].mean():.0%} are). Holdout: train "
+        f"{res['train_dates'][0]}..{res['train_dates'][1]}, test {res['test_dates'][0]}..{res['test_dates'][1]}.",
+        report.table(res["rows"], cols),
+        "Observed rates, conditions seen at least "
+        f"{conditions.MIN_N} times:\n\n"
+        + report.table(
+            [{**r, "rate": f"{r['rate']:.0%}", "ci": f"{r['low']:.0%}-{r['high']:.0%}"} for r in ins],
+            [
+                ("condition", "condition"),
+                ("sessions", "sessions"),
+                ("focused", "focused"),
+                ("rate", "rate"),
+                ("ci", "90% interval"),
+            ],
+        ),
+        f"Routine score {score:.2f} ({conditions.mode(ctx.blocks)} mode). "
+        + (
+            f"Suggestion: {wi['suggestion']['change']} ({wi['suggestion']['p_usual']:.0%} -> "
+            f"{wi['suggestion']['p_suggested']:.0%}, seen {wi['suggestion']['sessions_seen']} times)."
+            if wi["suggestion"]
+            else f"No suggestion: {wi['reason']}."
+        ),
+        f"Leakage check: {leak}.",
+    ]
+    path = report.update_section(f"conditions:{name}", "\n\n".join(md))
+    console.print(f"[dim]Saved to {path}[/]")
+
+
+def _context(data: Path | None, starter_rules: bool | None):
+    from sloth import tools
+
+    cfg = config.load()
+    d = _data_dir(data)
+    return tools.Context(d, cfg, _use_starter(d, starter_rules))
+
+
+def _run_agent(ctx, task: str, trace: bool, report_name: str, title: str, prefetch: tuple[str, ...] = ()) -> None:
+    import json
+
+    from rich.markdown import Markdown
+    from rich.panel import Panel
+
+    from sloth import agent
+
+    console.print(f"[bold]{agent.banner(ctx.cfg, ctx.data_dir)}[/]")
+
+    def on_call(call: agent.ToolCall) -> None:
+        if trace:
+            body = json.dumps(call.result, indent=1, default=str)
+            console.print(Panel(body, title=f"tool: {call.name}({json.dumps(call.args)})", expand=False))
+        else:
+            console.print(f"[dim]  ... {call.name}({', '.join(f'{k}={v}' for k, v in call.args.items())})[/]")
+
+    if prefetch:
+        from sloth import tools as tools_mod
+
+        console.print(f"[dim]TabPFN first ({', '.join(prefetch)}), so it never shares RAM with Gemma...[/]")
+        tools_mod.prefetch(ctx, list(prefetch))
+    console.print("[dim]Gemma is thinking (it's a sloth; a few minutes on CPU)...[/]")
+    res = agent.run(task, ctx, on_call=on_call)
+    console.print(Panel(Markdown(res.text or "_(no answer)_"), title=title))
+    if res.unmatched_numbers:
+        console.print(f"[yellow]Number check: not found in any tool result: {', '.join(res.unmatched_numbers)}[/]")
+    else:
+        console.print("[green]Number check: every number in the text appears in a tool result.[/]")
+    console.print(f"[dim]{res.llm_calls} LLM calls, {res.llm_seconds:.0f} s · {len(res.calls)} tool calls[/]")
+
+    out = Path(ctx.cfg.reports_dir) / f"{report_name}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    check = (
+        "every number appears in a tool result"
+        if not res.unmatched_numbers else "NOT found in tool results: " + ", ".join(res.unmatched_numbers)
+    )  # fmt: skip
+    out.write_text(
+        f"# {title}\n\n{res.text}\n\n---\n_Number check: {check}. Tools: "
+        f"{', '.join(c.name for c in res.calls) or 'none'}. {res.llm_calls} LLM calls, {res.llm_seconds:.0f} s. "
+        f"{agent.banner(ctx.cfg, ctx.data_dir)}_\n",
+        encoding="utf-8",
+    )
+    console.print(f"[dim]Saved to {out}[/]")
+
+
 @app.command("plan-tomorrow")
 def plan_tomorrow(
     data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Print the raw forecast only."),
+    trace: bool = typer.Option(False, "--trace", help="Show every tool call and result."),
     starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
 ) -> None:
     """Forecast tomorrow's focus hours and suggest when to do hard work."""
-    from sloth import data as data_mod
-    from sloth import forecast
+    from sloth import forecast, tools
 
-    cfg = config.load()
-    d = _data_dir(data)
-    blocks = data_mod.load_blocks(d, cfg, starter_rules=_use_starter(d, starter_rules))
-    fc = forecast.forecast_day(blocks, cfg)
+    ctx = _context(data, starter_rules)
+    fc = tools.forecast_frame(ctx)
     tr_from, tr_to = fc.attrs["train_dates"]
     t = Table(title=f"Raw forecast for {fc['date'].iloc[0]} (focus min per block; trained on {tr_from}..{tr_to})")
     for col in ("block", "mean", "10%", "50%", "90%", ""):
@@ -472,7 +615,7 @@ def plan_tomorrow(
             "#" * round(r.pred),
         )  # fmt: skip
     console.print(t)
-    p = forecast.plan(fc, blocks, cfg)
+    p = forecast.plan(fc, ctx.blocks, ctx.cfg)
     console.print(
         f"Predicted focus: [bold]{p['predicted_focus_hours']:.1f} h[/] "
         f"(rough range {p['range_hours'][0]:.1f}-{p['range_hours'][1]:.1f} h; "
@@ -482,26 +625,56 @@ def plan_tomorrow(
         console.print(f"  best window {w['start']}-{w['end']}: ~{w['expected_focus_min']} focus min expected")
     if p["rest_day"]:
         console.print("  Looks like a low-focus day. Rest without guilt.")
-    if not no_llm:
-        console.print("[yellow]Gemma's write-up of this plan lands in M4.[/] Showing the raw forecast only.")
+    if no_llm:
+        return
+    day = fc["date"].iloc[0]
+    task = (
+        f"Plan my {day:%A %Y-%m-%d}. Call forecast_tomorrow and focus_conditions. Write: 1) how much focus to "
+        "expect and whether to rest without guilt, 2) the best window(s) for hard work, 3) at most one "
+        "suggested change from focus_conditions with its evidence. Under 120 words."
+    )
+    _run_agent(ctx, task, trace, f"plan-{day}", f"Plan for {day}", prefetch=("forecast_tomorrow", "focus_conditions"))
 
 
 @app.command()
 def standup(
     date: str | None = typer.Option(None, help="YYYY-MM-DD (default: yesterday)."),
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
     trace: bool = typer.Option(False, "--trace", help="Show every tool call and result."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
 ) -> None:
     """Write a daily standup from your activity."""
-    _todo("M4")
+    from sloth import tools
+
+    ctx = _context(data, starter_rules)
+    day = tools.parse_range(ctx, date or "yesterday")[0]
+    task = (
+        f"Write my daily standup for {day:%A %Y-%m-%d}. Call day_summary with date {day}. Sections: "
+        "**Done** (where the time went, by category, with hours), **Focus** (focus hours and sessions), "
+        "**Next** (one line; you may call focus_conditions for one suggestion). Under 120 words."
+    )
+    _run_agent(ctx, task, trace, f"standup-{day}", f"Standup for {day}", prefetch=("focus_conditions",))
 
 
 @app.command()
 def timesheet(
-    week: bool = typer.Option(False, "--week", help="Summarise the last full week."),
+    week: bool = typer.Option(True, "--week", help="Summarise the last 7 days (the only mode for now)."),
+    start: str | None = typer.Option(None, help="First day YYYY-MM-DD (default: last 7 days)."),
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
     trace: bool = typer.Option(False, "--trace", help="Show every tool call and result."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
 ) -> None:
     """Write a weekly timesheet."""
-    _todo("M4")
+    ctx = _context(data, starter_rules)
+    span = f"starting {start}" if start else "for the last 7 days"
+    task = (
+        f"Write my weekly timesheet {span}. Call week_summary"
+        + (f" with start {start}" if start else "")
+        + " and top_distractions with range 'week'. Give a markdown table with one row per day (date, active "
+        "hours, work hours, focus hours), then totals by category, then one sentence on where non-work time "
+        "went. Use only tool numbers."
+    )
+    _run_agent(ctx, task, trace, f"timesheet-{start or ctx.last_date}", "Weekly timesheet")
 
 
 if __name__ == "__main__":

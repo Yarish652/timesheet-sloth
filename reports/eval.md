@@ -260,3 +260,72 @@ TabPFN 80% predictive interval (10%-90% quantiles) covered 90.6% of blocks.
 
 _Updated 2026-10-24 00:58._
 <!-- /forecast:synthetic data, starter rules off, focus=shifts<=2 -->
+
+<!-- conditions:synthetic data, starter rules off, focus=shifts<=2 -->
+## Focus conditions (synthetic data, starter rules off, focus=shifts<=2)
+
+200 sessions (a gap of 15+ min starts a new one); a session is focused with >= 25 focus minutes (28% are). Holdout: train 2026-09-25..2026-10-08, test 2026-10-09..2026-10-22.
+
+| method | ROC-AUC (higher) | Brier (lower) | log-loss (lower) | n_train | n_test | fit+predict s |
+|---|---|---|---|---|---|---|
+| TabPFN | 0.804 | 0.180 | 0.535 | 96 | 104 | 107.177 |
+| base rate | 0.500 | 0.228 | 0.651 | 96 | 104 | 0.000 |
+| rate by start hour | 0.700 | 0.198 | 0.595 | 96 | 104 | 0.000 |
+
+Observed rates, conditions seen at least 8 times:
+
+| condition | sessions | focused | rate | 90% interval |
+|---|---|---|---|---|
+| started in the morning 06-12 | 40 | 24 | 60% | 47%-72% |
+| started with Work | 63 | 36 | 57% | 47%-67% |
+| previous session was mostly Work | 69 | 25 | 36% | 27%-46% |
+| previous session was mostly Comms | 18 | 6 | 33% | 18%-53% |
+| started in the afternoon 12-18 | 68 | 22 | 32% | 24%-42% |
+| previous session was mostly Uncategorized | 43 | 11 | 26% | 16%-38% |
+| previous session was mostly Media | 69 | 14 | 20% | 14%-29% |
+| started with Uncategorized | 20 | 4 | 20% | 9%-38% |
+| started with Comms | 32 | 6 | 19% | 10%-32% |
+| started in the evening 18-24 | 79 | 11 | 14% | 9%-22% |
+| started with Media | 85 | 11 | 13% | 8%-20% |
+| started in the night 00-06 | 13 | 0 | 0% | 0%-17% |
+
+Routine score 0.57 (routine mode). Suggestion: start in the morning 06-12 with Work instead of the evening 18-24 with Media (35% -> 85%, seen 20 times).
+
+Leakage check: PASS: features are start-time context only.
+
+_Updated 2026-10-24 01:45._
+<!-- /conditions:synthetic data, starter rules off, focus=shifts<=2 -->
+
+<!-- conditions:real data, starter rules on, focus=shifts<=2 -->
+## Focus conditions (real data, starter rules on, focus=shifts<=2)
+
+295 sessions (a gap of 15+ min starts a new one); a session is focused with >= 25 focus minutes (19% are). Holdout: train 2026-07-17..2026-10-09, test 2026-10-10..2026-10-23.
+
+| method | ROC-AUC (higher) | Brier (lower) | log-loss (lower) | n_train | n_test | fit+predict s |
+|---|---|---|---|---|---|---|
+| TabPFN | 0.747 | 0.119 | 0.387 | 239 | 56 | 125.194 |
+| base rate | 0.500 | 0.126 | 0.421 | 239 | 56 | 0.000 |
+| rate by start hour | 0.516 | 0.127 | 0.425 | 239 | 56 | 0.000 |
+
+Observed rates, conditions seen at least 8 times:
+
+| condition | sessions | focused | rate | 90% interval |
+|---|---|---|---|---|
+| started with Work | 129 | 46 | 36% | 29%-43% |
+| started with Comms | 9 | 2 | 22% | 8%-50% |
+| previous session was mostly Work | 128 | 28 | 22% | 16%-28% |
+| started in the afternoon 12-18 | 101 | 22 | 22% | 16%-29% |
+| started in the night 00-06 | 70 | 14 | 20% | 13%-29% |
+| previous session was mostly Uncategorized | 127 | 22 | 17% | 12%-24% |
+| started in the evening 18-24 | 111 | 18 | 16% | 11%-23% |
+| started in the morning 06-12 | 13 | 2 | 15% | 5%-37% |
+| started with Media | 30 | 4 | 13% | 6%-27% |
+| previous session was mostly Media | 35 | 4 | 11% | 5%-23% |
+| started with Uncategorized | 127 | 4 | 3% | 1%-7% |
+
+Routine score 0.33 (design mode). Suggestion: start in the evening 18-24 with Work instead of the evening 18-24 with Uncategorized (7% -> 44%, seen 39 times).
+
+Leakage check: PASS: features are start-time context only.
+
+_Updated 2026-10-24 01:41._
+<!-- /conditions:real data, starter rules on, focus=shifts<=2 -->
