@@ -74,6 +74,9 @@ uv run sloth notify-test     # check desktop notifications work
 - Suggestions are ranked by gain × how often you already start that way, so a habit you already have
   beats one you never do. `data/cache/shown.jsonl` records what was suggested (never titles), for a
   future "did it help?" analysis.
+- Notifications come from "Windows PowerShell". If **Do Not Disturb** (or its automatic hours) is on,
+  Windows delivers them silently to the notification centre (Win + N) without a pop-up.
+  `sloth next` always works as a fallback.
 - `suggest_projects = true` in `sloth.toml` adds your editor's workspace name. It's shown in the local
   notification only, never sent to Gemma.
 

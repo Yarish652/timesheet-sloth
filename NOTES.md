@@ -395,3 +395,7 @@ Work first", gain 0.36, category; no titles). Three things this caught that test
 `sloth next` after the fixes: "Evening sessions that start with Work tend to become focused 36% of
 the time (from 40 sessions), vs 4% for your usual Uncategorized start. Pick up where you left
 off: Work in chrome.exe, last touched 6 min ago." 0.03 s from the cache.
+- **The toast didn't pop up**, but it was delivered: the user found it in the notification centre
+  (Win + N). PowerShell reported no error, and the registry showed Windows PowerShell's
+  notifications enabled, so Windows was holding back the banner (Do Not Disturb / quiet hours at
+  ~23:00). Documented in the README; `sloth next` is the fallback.
