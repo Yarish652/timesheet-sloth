@@ -332,3 +332,48 @@ so no download) · `python -m sloth.export` 4 min 43 s (84 active days, 153 h, 6
 `categories.json` in the clone → 0 rules → starter rules only). Then `sloth label --dry-run`
 worked, and **69 tests passed in the clone** (124 s), so the suite doesn't lean on local files.
 The clone held a copy of the real export and was deleted afterwards.
+
+## From prediction to suggestion: idle-time cache (2026-10-25)
+
+**Why.** Prediction of *when* failed (M3), but a live suggestion costs ~5 min on this laptop
+(TabPFN ~2 min + Gemma ~2–3 min). So the slow part moves to when the laptop is idle, and the
+moment you sit down is a cache read.
+
+**How.** `sloth daemon` polls ActivityWatch's AFK bucket every 60 s (localhost, behind netguard).
+After 10 idle minutes, if ≥ 3 GB of RAM is free and the cache is stale, it runs an incremental
+export, scores the next 24 hours, has Gemma reword the top two suggestions, writes the cache
+atomically, and asks Ollama to unload. It does all this at below-normal priority and aborts if
+you come back. On return after a 15+ min break, it shows a Windows toast (PowerShell's built-in
+`Windows.UI.Notifications`, no new package) and logs what it showed to `shown.jsonl` (no titles,
+no project). Ranking = gain × feasibility (how often you already start that way), so habits beat
+long shots. Project names from editor titles are opt-in, local-only, and tested never to reach
+Gemma.
+
+**Real numbers.**
+- `sloth cache build`: **95 s** total. Incremental export 14 s (vs ~4.5 min full), TabPFN grid 17 s
+  (one fit on 305 sessions + one predict over 60 options), Gemma 61 s for one rewording (39 s of it
+  model load). 7.8 GB free RAM this time, vs ~1 GB in the bad M4 runs.
+- Cached suggestion (evening): open Work first instead of an Uncategorized app: 40% vs 4%
+  focused (+36 points, 40 sessions). No change suggested for afternoon/night/morning.
+- `sloth next`: the cache lookup is **0.07 s**, but the command is **1.3–2.0 s** wall. That's
+  Python start-up + pandas, after making scikit-learn a lazy import (it alone was 1.7 s of a 2.8 s
+  run). Inside the always-running daemon there's no start-up, so toasts are immediate.
+- `sloth notify-test`: PowerShell returned success (1.5 s). Whether the toast was *visible*
+  needs the user to confirm; Focus Assist can swallow them.
+
+**Surprises.**
+- The resume line said "Work > Programming in WindowsTerminal.exe, 3 min ago". That was the coding
+  assistant's own terminal, which ActivityWatch logs as the user's activity. AI pair-programming
+  shows up as your work.
+- `reports/timings.jsonl` had picked up one fit/predict pair from a debug run with the
+  RandomForest stand-in (predict 0.003 s); removed by timestamp. Lesson: debug runs should point
+  `timing.LOG_PATH` elsewhere, as the tests do.
+- A scheduled task starts in System32, where `.env`, `sloth.toml` and `reports/` don't resolve;
+  `sloth daemon --data <path>` now `chdir`s to the data dir's parent first.
+- First grid tests failed for the right reason: night hours had no start pattern seen 8+ times,
+  so 18 of 24 hours had entries, and the RandomForest stand-in was too noisy for any 10-point
+  gain. The test now counts hours that *can* have an option, and uses a deterministic stand-in.
+
+**Not done tonight (by plan):** accept/ignore learning from `shown.jsonl` and the coin-flip
+experiment. Not verified: a real idle → build → return → toast cycle (needs the user away from
+the keyboard for 10+ min; the state machine is tested with a fake clock).

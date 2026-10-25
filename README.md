@@ -50,6 +50,39 @@ uv run sloth eval label|forecast|conditions|focus-definition
 Add `--trace` to `standup`, `timesheet` or `plan-tomorrow` to see every tool call and every number
 Gemma was given. Markdown copies land in `reports/` (gitignored, except `reports/eval.md`).
 
+## Suggestions while you're away
+
+Predicting *when* you'll focus doesn't work for irregular schedules (see Results), and computing a
+plan live takes minutes on a laptop. So sloth does the slow part while you're not using the
+computer, and has a suggestion ready the moment you sit down:
+
+```sh
+uv run sloth daemon          # leave it running; it builds after 10 idle minutes
+uv run sloth next            # what to open first and what to resume, from the cache (~1 s)
+uv run sloth cache build     # the daemon's build, on demand
+uv run sloth notify-test     # check desktop notifications work
+```
+
+- **While you're away** (ActivityWatch says AFK for 10+ minutes, and at least 3 GB of RAM is free),
+  the daemon updates the export incrementally and has TabPFN score every way of starting a
+  session you've actually used, for each of the next 24 hours, in one call. Gemma optionally
+  rewords the top two. The result goes to `data/cache/suggestions.json`, and Gemma is unloaded
+  afterwards.
+- **When you come back** after a 15+ minute break, you get a desktop notification such as "Evening
+  sessions that start with Work tend to become focused 44% of the time (from 39 sessions), vs 7% for
+  your usual start. Pick up where you left off: Work > Programming in Code.exe, last touched 3 h ago."
+- Suggestions are ranked by gain × how often you already start that way, so a habit you already have
+  beats one you never do. `data/cache/shown.jsonl` records what was suggested (never titles), for a
+  future "did it help?" analysis.
+- `suggest_projects = true` in `sloth.toml` adds your editor's workspace name. It's shown in the local
+  notification only, never sent to Gemma.
+
+Start it at login on Windows (optional; run once, in the repo folder):
+
+```powershell
+schtasks /create /sc onlogon /tn "Timesheet Sloth" /tr "\"$PWD\.venv\Scripts\sloth.exe\" daemon --data \"$PWD\data\""
+```
+
 ## How it works
 
 ```mermaid
@@ -179,7 +212,7 @@ reach the internet it would fail loudly rather than quietly succeed.
 ## Development
 
 ```sh
-uv run pytest            # 69 tests on synthetic data (one runs the real TabPFN; ~4 min)
+uv run pytest            # 83 tests on synthetic data (one runs the real TabPFN; ~2-4 min)
 uv run ruff check && uv run ruff format
 ```
 

@@ -38,6 +38,14 @@ class Config:
     # `focus_session_min` focus minutes counts as focused.
     session_gap_min: int = 15
     focus_session_min: int = 25
+    # Suggestions while you're away: `sloth daemon` builds the cache after this many idle minutes,
+    # only with at least this much free RAM, and shows a toast when you come back.
+    idle_build_min: int = 10
+    daemon_poll_s: int = 60
+    min_free_ram_gb: float = 3.0
+    cache_max_age_h: float = 12.0
+    suggest_projects: bool = False  # add the editor workspace name to *local* notifications only
+    suggest_with_llm: bool = True  # let Gemma reword the top suggestions during the idle build
     # TabPFN on CPU handles about this many training rows comfortably.
     max_train_rows: int = 5000
     tabpfn_version: str = "v3.5-fast"

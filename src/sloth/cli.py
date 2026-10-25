@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 from pathlib import Path
 
@@ -675,6 +676,208 @@ def timesheet(
         "went. Use only tool numbers."
     )
     _run_agent(ctx, task, trace, f"timesheet-{start or ctx.last_date}", "Weekly timesheet")
+
+
+cache_app = typer.Typer(help="The suggestion cache that `sloth next` and the daemon read.", no_args_is_help=True)
+app.add_typer(cache_app, name="cache")
+
+
+def _build_suggestions(d: Path, cfg: config.Config, use_starter: bool, should_stop, use_llm: bool, say):
+    """Incremental export -> TabPFN grid -> optional Gemma rewording -> atomic cache write."""
+    import gc
+
+    from sloth import cache, daemon, export, suggest, tools
+    from sloth.timing import timed
+
+    with timed("suggest.build_total") as rec:
+        if (d / "events.csv").exists() and "true_category" not in (d / "events.csv").open(encoding="utf-8").readline():
+            say("updating the export (incremental)...")
+            with timed("suggest.export_incremental"):
+                export.main(["--since-last", "--out", str(d), "--url", cfg.aw_url])
+        if should_stop():
+            raise daemon.Aborted
+        ctx = tools.Context(d, cfg, use_starter)
+        say(f"scoring {suggest.GRID_HOURS} upcoming hours with TabPFN...")
+        with timed("suggest.grid"):
+            payload = suggest.build(ctx)
+        if should_stop():
+            raise daemon.Aborted
+        payload["polished"] = {}
+        if use_llm:
+            now = pd_now(cfg)
+            seen: set[str] = set()
+            for entry in payload["grid"]:
+                if entry["best"] and entry["bucket"] not in seen and len(seen) < 2:
+                    seen.add(entry["bucket"])
+                    say(f"Gemma rewording the {entry['bucket']} suggestion...")
+                    text = suggest.polish(suggest.facts(payload, entry, now), ctx)
+                    if text:
+                        payload["polished"][entry["bucket"]] = text
+                    if should_stop():
+                        raise daemon.Aborted
+            daemon.unload_llm(cfg)
+        out = cache.write(d, cfg, payload)
+        rec["grid_entries"] = len(payload["grid"])
+    del ctx
+    gc.collect()
+    say(f"cache written: {out}")
+    return payload
+
+
+def pd_now(cfg: config.Config):
+    import pandas as pd
+
+    return pd.Timestamp.now(tz=cfg.timezone)
+
+
+def _pick_text(d: Path, cfg: config.Config, now):
+    """(text, log record) from the cache for `now`, or None if there's no cache."""
+    from sloth import cache, suggest
+
+    payload = cache.read(d)
+    if not payload:
+        return None
+    now = now.tz_convert(cfg.timezone)
+    entry = suggest.pick(payload, now)
+    text = suggest.render(payload, entry, now, local=True)
+    best = entry["best"] if entry else None
+    record = {
+        "cache_built_at": payload["built_at"],
+        "entry_at": entry["at"] if entry else None,
+        "bucket": entry["bucket"] if entry else None,
+        "open_first": best["starter_family"] if best else None,
+        "gain": round(best["gain"], 3) if best else None,
+        "resume_category": (payload.get("resume") or {}).get("category"),
+    }
+    return text, record
+
+
+@app.command("next")
+def next_(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
+    live: bool = typer.Option(False, "--live", help="Recompute now instead of reading the cache (slow)."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
+) -> None:
+    """What to work on right now: instant, from the cache built while you were away."""
+    import time
+
+    from sloth import cache
+
+    t0 = time.perf_counter()
+    cfg = config.load()
+    d = _data_dir(data)
+    now = pd_now(cfg)
+    if live:
+        _build_suggestions(d, cfg, _use_starter(d, starter_rules), lambda: False, cfg.suggest_with_llm,
+                           lambda m: console.print(f"[dim]{m}[/]"))  # fmt: skip
+    payload = cache.read(d)
+    picked = _pick_text(d, cfg, now)
+    if picked is None:
+        console.print("No suggestions cached yet. Run `sloth cache build` once, or leave `sloth daemon` running.")
+        raise typer.Exit(1)
+    text, _ = picked
+    age_h = (now - type(now)(payload["built_at"])).total_seconds() / 3600
+    fresh = cache.is_fresh(payload, d, cfg, now)
+    console.print(f"[bold]{text}[/]")
+    console.print(
+        f"[dim]{'live' if live else 'from cache'} · built {age_h:.1f} h ago"
+        f"{'' if fresh else ' (stale: new data since, or older than ' + str(cfg.cache_max_age_h) + ' h)'}"
+        f" · {time.perf_counter() - t0:.2f} s[/]"
+    )
+
+
+@cache_app.command("build")
+def cache_build(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
+    no_llm: bool = typer.Option(False, "--no-llm", help="Skip Gemma's rewording (template text only)."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
+) -> None:
+    """Build the suggestion cache now (what the daemon does while you're idle)."""
+    import time
+
+    from sloth import suggest
+
+    cfg = config.load()
+    d = _data_dir(data)
+    t0 = time.perf_counter()
+    use_llm = cfg.suggest_with_llm and not no_llm
+    say = lambda m: console.print(f"[dim]{m}[/]")  # noqa: E731
+    payload = _build_suggestions(d, cfg, _use_starter(d, starter_rules), lambda: False, use_llm, say)
+    t = Table(title=f"Cached suggestions ({len(payload['grid'])} upcoming hours, {time.perf_counter() - t0:.0f} s)")
+    for col in ("from", "part of day", "usual start", "suggest opening", "P focused", "gain", "seen"):
+        t.add_column(col, justify="right" if col in ("P focused", "gain", "seen") else "left")
+    shown = set()
+    for e in payload["grid"]:
+        b = e["best"]
+        key = (e["bucket"], b["starter_family"] if b else None)
+        if key in shown:
+            continue
+        shown.add(key)
+        t.add_row(
+            e["at"][11:16], e["bucket"], e["usual_family"], b["starter_family"] if b else "(keep your usual)",
+            f"{b['p_focused']:.0%}" if b else f"{e['usual_p']:.0%}" if e["usual_p"] is not None else "-",
+            f"+{b['gain']:.0%}" if b else "-", str(b["sessions_seen"]) if b else "-",
+        )  # fmt: skip
+    console.print(t)
+    now = pd_now(cfg)
+    console.print(f"Right now: {suggest.render(payload, suggest.pick(payload, now), now)}")
+
+
+@app.command()
+def daemon(
+    data: Path | None = typer.Option(None, help="Data dir (default: $SLOTH_DATA_DIR)."),
+    idle_min: int | None = typer.Option(None, help="Idle minutes before building (default: config, 10)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Log decisions only: no builds, no notifications."),
+    starter_rules: bool | None = typer.Option(None, "--starter-rules/--no-starter-rules", help=_STARTER_HELP),
+) -> None:
+    """Build suggestions while you're away; show one when you come back."""
+    from sloth import cache, notify
+    from sloth import daemon as dm
+
+    if data is not None:
+        # A scheduled task starts in System32: work from the folder holding the data dir, so .env,
+        # sloth.toml and reports/ resolve the same way as in an interactive shell.
+        os.chdir(data.resolve().parent)
+        data = Path(data.resolve().name)
+    cfg = config.load()
+    if idle_min is not None:
+        cfg.idle_build_min = idle_min
+    d = _data_dir(data)
+    dm.lock(d)
+    dm.lower_priority()
+    use_starter = _use_starter(d, starter_rules)
+    say = lambda m: console.print(f"[dim]{m}[/]")  # noqa: E731
+
+    def build(should_stop) -> None:
+        if dry_run:
+            say("(dry run) would build the cache now")
+            return
+        _build_suggestions(d, cfg, use_starter, should_stop, cfg.suggest_with_llm, say)
+
+    d_ = dm.Daemon(
+        cfg=cfg,
+        status=dm.AFKClient(cfg.aw_url).status,
+        build=build,
+        is_fresh=lambda now: cache.is_fresh(cache.read(d), d, cfg, now),
+        suggestion=lambda now: _pick_text(d, cfg, now),
+        notify=(lambda t, b: console.print(f"(dry run) toast: {b}")) if dry_run else notify.toast,
+        log=(lambda r: None) if dry_run else (lambda r: cache.log_shown(d, r)),
+        say=say,
+    )
+    console.print(
+        f"sloth daemon: building after {cfg.idle_build_min} idle min (needs {cfg.min_free_ram_gb:g} GB free RAM), "
+        f"suggesting after breaks of {cfg.session_gap_min}+ min. Ctrl+C to stop."
+    )
+    dm.run_forever(d_, cfg.daemon_poll_s)
+
+
+@app.command("notify-test")
+def notify_test() -> None:
+    """Show one desktop notification, to check they work on this machine."""
+    from sloth import notify
+
+    ok = notify.toast("Timesheet Sloth", "If you can read this, suggestions can reach you. Now go rest.")
+    console.print("Notification sent." if ok else "No notifier worked; printed to the terminal instead.")
 
 
 if __name__ == "__main__":

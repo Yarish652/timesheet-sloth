@@ -162,6 +162,16 @@ def parse_ts(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
+def read_events(path):
+    """Rows of an events.csv written by write_events, with datetimes and floats restored."""
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["start"], r["end"] = parse_ts(r["start"]), parse_ts(r["end"])
+        r["duration_s"] = float(r["duration_s"])
+    return rows
+
+
 def write_events(rows, path, extra_fields=()):
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=[*EVENT_FIELDS, *extra_fields])
@@ -266,6 +276,11 @@ def main(argv=None):
         default=None,
         help="web UI category export JSON, used when the server has no rules (default: <out>/categories.json)",
     )
+    ap.add_argument(
+        "--since-last",
+        action="store_true",
+        help="only fetch events since the end of the existing events.csv (minus 1 h overlap) and append",
+    )
     a = ap.parse_args(argv)
     base = a.url.rstrip("/")
     Path(a.out).mkdir(parents=True, exist_ok=True)
@@ -293,6 +308,14 @@ def main(argv=None):
     local_tz = datetime.now().astimezone().tzinfo
     end = datetime.now(UTC)
     start = end - timedelta(days=a.days)
+    kept = []
+    if a.since_last and Path(f"{a.out}/events.csv").exists():
+        old = read_events(f"{a.out}/events.csv")
+        if old:
+            cut = max(r["end"] for r in old) - timedelta(hours=1)  # re-fetch the last hour: it may have grown
+            kept = [r for r in old if r["start"] < cut]
+            start = cut
+            print(f"incremental: keeping {len(kept)} events, fetching since {cut.isoformat(timespec='minutes')}")
     win, web = fetch_active_events(base, win_b, afk_b, web_b, start, end)
 
     # index browser events so window events from browsers can borrow the URL
@@ -339,6 +362,8 @@ def main(argv=None):
                 "category": categorize(rules, app, title, url),
             }
         )
+    if kept:  # incremental mode only; the default export keeps exactly what the server returned
+        rows = kept + [r for r in rows if r["start"] >= start.astimezone(local_tz)]
     rows.sort(key=lambda r: r["start"])
 
     write_events(rows, f"{a.out}/events.csv")

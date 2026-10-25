@@ -18,7 +18,7 @@ from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 from sloth import features, models
 from sloth.config import Config
-from sloth.sessions import HOUR_BUCKETS, START_CATEGORICAL, START_FEATURES
+from sloth.sessions import HOUR_BUCKETS, START_CATEGORICAL, START_FEATURES, hour_bucket
 from sloth.timing import timed
 
 MIN_N = 8  # smallest number of sessions behind any shown rate or suggestion
@@ -134,6 +134,24 @@ def insights(sessions: pd.DataFrame, min_n: int = MIN_N) -> list[dict[str, Any]]
     return sorted(out, key=lambda r: -r["rate"])
 
 
+def start_row(sessions: pd.DataFrame, start: pd.Timestamp, starter_family: str) -> dict[str, Any]:
+    """Feature row for a hypothetical session starting at `start` with `starter_family`, after the
+    last real session in `sessions` (start-time context only, like `sessions.build_sessions`)."""
+    last = sessions.iloc[-1]
+    focused_ends = sessions.loc[sessions["focused"] == 1, "end"]
+    return {
+        "start_hour": start.hour,
+        "weekday": start.weekday(),
+        "is_weekend": int(start.weekday() >= 5),
+        "minutes_since_prev_session": (start - last["end"]).total_seconds() / 60,
+        "hours_since_last_focus": (start - focused_ends.max()).total_seconds() / 3600 if len(focused_ends) else np.nan,
+        "prev_session_focused": float(last["focused"]),
+        "hour_bucket": hour_bucket(start.hour),
+        "starter_family": starter_family,
+        "prev_session_family": last["prev_session_family"],
+    }
+
+
 def what_if(sessions: pd.DataFrame, cfg: Config, min_n: int = MIN_N) -> dict[str, Any]:
     """Compare the user's usual way of starting with alternatives they've done at least min_n times.
 
@@ -149,29 +167,12 @@ def what_if(sessions: pd.DataFrame, cfg: Config, min_n: int = MIN_N) -> dict[str
             "reason": f"no start pattern seen {min_n}+ times",
         }
     usual = combos.idxmax()
-    last = sessions.iloc[-1]
-    next_day = pd.Timestamp(last["date"]) + pd.Timedelta(days=1)
-    rows = []
-    for bucket, fam in supported.index:
-        hour = BUCKET_HOUR[bucket]
-        start = pd.Timestamp(next_day.date()).tz_localize(sessions["start"].dt.tz) + pd.Timedelta(hours=hour)
-        rows.append(
-            {
-                "start_hour": hour,
-                "weekday": next_day.weekday(),
-                "is_weekend": int(next_day.weekday() >= 5),
-                "minutes_since_prev_session": (start - last["end"]).total_seconds() / 60,
-                "hours_since_last_focus": (
-                    (start - sessions.loc[sessions["focused"] == 1, "end"].max()).total_seconds() / 3600
-                    if sessions["focused"].any()
-                    else np.nan
-                ),
-                "prev_session_focused": float(last["focused"]),
-                "hour_bucket": bucket,
-                "starter_family": fam,
-                "prev_session_family": last["prev_session_family"],
-            }
-        )
+    next_day = pd.Timestamp(sessions.iloc[-1]["date"]) + pd.Timedelta(days=1)
+    tz = sessions["start"].dt.tz
+    rows = [
+        start_row(sessions, pd.Timestamp(next_day.date()).tz_localize(tz) + pd.Timedelta(hours=BUCKET_HOUR[b]), f)
+        for b, f in supported.index
+    ]
     hypo = pd.DataFrame(rows)
     p = predict_proba(sessions, hypo, cfg)
     options = [
