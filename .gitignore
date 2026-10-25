@@ -23,3 +23,6 @@ sloth.local.toml
 # Personal outputs (standups, timesheets, plans). eval.md holds aggregate metrics and is kept.
 reports/*.md
 !reports/eval.md
+
+# Local drafts
+post-draft.md

@@ -1,8 +1,12 @@
 # Timesheet Sloth 🦥
 
+[![CI](https://github.com/Yarish652/MCP-AW/actions/workflows/ci.yml/badge.svg)](https://github.com/Yarish652/MCP-AW/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A fully local agent that reads your [ActivityWatch](https://activitywatch.net) history and does the
 work you hate: your standup, your weekly timesheet, labelling the time your category rules missed,
-and telling you when to do hard work and when to rest without guilt.
+and, while your laptop is idle, preparing one suggestion for when you sit back down (what to open
+first, and what you were last working on).
 
 - **TabPFN 3.5** (open weights, local, CPU) labels Uncategorized time, forecasts tomorrow's focus,
   and learns which ways of starting a session tend to end in focus.
@@ -38,6 +42,8 @@ every command takes `--data demo-data`.
 ## Use it
 
 ```sh
+uv run sloth next                         # what to work on right now (instant, from the cache)
+uv run sloth daemon                       # leave running: builds suggestions while you're away
 uv run sloth standup --date 2026-10-21    # Done / Focus / Next, from that day's numbers
 uv run sloth timesheet --week             # per-day table + totals by category
 uv run sloth plan-tomorrow                # the day after your last complete day of data
@@ -106,6 +112,9 @@ flowchart LR
     G -->|JSON of numbers,<br/>categories, app names| LLM[Gemma 4 E4B<br/>Ollama localhost:11434]
     LLM -->|tool calls| TO
     LLM --> NC[number checker] --> R[standup / timesheet / plan]
+    D[sloth daemon<br/>while you're AFK] -.->|builds| CA[(suggestion cache)]
+    CO --> CA
+    CA -.->|when you're back| N[desktop notification<br/>/ sloth next]
 ```
 
 1. **Labelling.** Your ActivityWatch rules (plus sloth's generic starter rules) label part of your
@@ -138,7 +147,8 @@ What it does share with Gemma (locally): category names, app executable names (e
 hours, counts, times of day. An app name can itself be revealing; there's no allow-list for those yet.
 
 The coding assistant that helped build this (a closed model) never saw the real data either: it
-worked against `sloth synth` output and only ran aggregate-printing scripts on the real export.
+worked against `sloth synth` output and only ran aggregate-printing scripts on the real export The rule it worked under is in
+[`CLAUDE.md`](CLAUDE.md).
 
 ## Results (real data: one person, ~14 weeks, 151 active hours)
 
@@ -215,7 +225,7 @@ reach the internet it would fail loudly rather than quietly succeed.
 ## Development
 
 ```sh
-uv run pytest            # 83 tests on synthetic data (one runs the real TabPFN; ~2-4 min)
+uv run pytest            # 85 tests on synthetic data (~2 min; the real-TabPFN one skips without weights)
 uv run ruff check && uv run ruff format
 ```
 
