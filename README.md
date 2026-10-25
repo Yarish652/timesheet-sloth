@@ -1,6 +1,6 @@
 # Timesheet Sloth 🦥
 
-[![CI](https://github.com/Yarish652/MCP-AW/actions/workflows/ci.yml/badge.svg)](https://github.com/Yarish652/MCP-AW/actions/workflows/ci.yml)
+[![CI](https://github.com/Yarish652/timesheet-sloth/actions/workflows/ci.yml/badge.svg)](https://github.com/Yarish652/timesheet-sloth/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A fully local agent that reads your [ActivityWatch](https://activitywatch.net) history and does the
@@ -24,7 +24,7 @@ plus a free TabPFN licence acceptance at [ux.priorlabs.ai](https://ux.priorlabs.
 in `.env` as `TABPFN_TOKEN=...` (copy `.env.example`), or let `sloth setup` open the browser.
 
 ```sh
-git clone https://github.com/Yarish652/MCP-AW.git timesheet-sloth && cd timesheet-sloth
+git clone https://github.com/Yarish652/timesheet-sloth.git && cd timesheet-sloth
 uv sync
 ollama pull gemma4:e4b
 uv run sloth setup
