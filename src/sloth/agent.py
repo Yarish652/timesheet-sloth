@@ -155,35 +155,40 @@ def _walk(x: Any) -> list[Any]:
     return [x]
 
 
-def _allowed(results: list[dict[str, Any]]) -> tuple[list[float], set[str]]:
-    """Every number in the tool results (fractions also as percentages), plus their HH:MM times."""
-    nums: list[float] = []
+def _allowed(results: list[dict[str, Any]]) -> tuple[list[float], list[float], set[str]]:
+    """Numbers in the tool results: plain values, values that may be written as percentages
+    (fractions x 100, and numbers that already carry a % sign), and HH:MM times."""
+    plain: list[float] = []
+    percent: list[float] = []
     times: set[str] = set()
     for leaf in _walk(results):
         if isinstance(leaf, bool):
             continue
         if isinstance(leaf, int | float):
-            values = [float(leaf)]
+            v = float(leaf)
+            plain.append(v)
+            if 0 < abs(v) <= 1:
+                percent.append(v * 100)
         elif isinstance(leaf, str):
             times.update(t.zfill(5) for t in _TIME.findall(leaf))
-            stripped = _TIME.sub(" ", _DATE.sub(" ", leaf))
-            values = [float(m.rstrip("%")) for m in _NUM.findall(stripped)]
-        else:
-            continue
-        for v in values:
-            nums.append(v)
-            if 0 < abs(v) <= 1:
-                nums.append(v * 100)
-    return sorted(nums), times
+            for m in _NUM.findall(_TIME.sub(" ", _DATE.sub(" ", leaf))):
+                (percent if m.endswith("%") else plain).append(float(m.rstrip("%")))
+    return sorted(plain), sorted(percent), times
+
+
+def _near(values: list[float], x: float, tol: float) -> bool:
+    i = bisect.bisect_left(values, x - tol)
+    return i < len(values) and values[i] <= x + tol
 
 
 def check_numbers(prose: str, results: list[dict[str, Any]]) -> list[str]:
     """Numbers in the prose that aren't a tool number rounded to the prose's precision.
 
     "5.3" matches a tool value of 5.25 (|5.25 - 5.3| <= 0.05), whichever way the model rounds
-    halves; "5.4" doesn't. Dates are ignored; HH:MM times must match exactly.
+    halves; "5.4" doesn't. A number written with % must match a fraction x 100 (0.41 -> "41%"), so
+    "0.41%" for a 41% rate is flagged. Dates are ignored; HH:MM times must match exactly.
     """
-    nums, times = _allowed(results)
+    plain, percent, times = _allowed(results)
     unmatched = [t for t in _TIME.findall(prose) if t.zfill(5) not in times]
     text = _TIME.sub(" ", _DATE.sub(" ", prose))
     for m in _NUM.findall(text):
@@ -191,7 +196,6 @@ def check_numbers(prose: str, results: list[dict[str, Any]]) -> list[str]:
         x = float(raw)
         decimals = len(raw.split(".")[1]) if "." in raw else 0
         tol = 0.5 * 10**-decimals + 1e-9
-        i = bisect.bisect_left(nums, x - tol)
-        if not (i < len(nums) and nums[i] <= x + tol):
+        if not _near(percent if m.endswith("%") else plain, x, tol):
             unmatched.append(m)
     return unmatched

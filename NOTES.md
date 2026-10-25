@@ -377,3 +377,21 @@ Gemma.
 **Not done tonight (by plan):** accept/ignore learning from `shown.jsonl` and the coin-flip
 experiment. Not verified: a real idle → build → return → toast cycle (needs the user away from
 the keyboard for 10+ min; the state machine is tested with a fake clock).
+
+**First real daemon cycle (2026-10-25 evening, IST).** The user stepped away at 22:53. AW marked
+AFK, the daemon built the cache at 22:57 (incremental export → TabPFN grid → Gemma → write),
+and on return after **21 minutes** it sent the toast and logged it (`shown.jsonl`: bucket, "open
+Work first", gain 0.36, category; no titles). Three things this caught that tests hadn't:
+- **The monitor killed the daemon.** A 30-min monitor that *runs* the daemon kills it on expiry.
+  Run the daemon as its own process and only `tail -F` its log.
+- **Gemma wrote "focused 0.41% of the time"** (should be 41%) and dropped *what to open first*.
+  The number checker passed it because it stripped the % sign and found 0.41 in the facts. Now a
+  number written with % must match a fraction × 100, and a rewording that doesn't name the
+  suggested app family is discarded. After the fix, Gemma's rewording was rejected on both
+  rebuilds, so the template sentence is what users see. That's fine: the template is honest and
+  instant.
+- **The grid started at the next full hour**, so at 23:35 the nearest entry was midnight's (no
+  suggestion). It now covers the current hour. The daemon log also printed UTC; it's local now.
+`sloth next` after the fixes: "Evening sessions that start with Work tend to become focused 36% of
+the time (from 40 sessions), vs 4% for your usual Uncategorized start. Pick up where you left
+off: Work in chrome.exe, last touched 6 min ago." 0.03 s from the cache.

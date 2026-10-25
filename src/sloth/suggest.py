@@ -21,7 +21,8 @@ _EDITOR_SUFFIX = re.compile(r"\s-\s(Visual Studio Code|Cursor)(\s-\s.*)?$")
 
 
 def _round_hour(t: pd.Timestamp) -> pd.Timestamp:
-    return t.floor("h") + pd.Timedelta(hours=1)
+    """Start of the current hour: the grid must cover 'right now', not only the hours ahead."""
+    return t.floor("h")
 
 
 def option_grid(sessions: pd.DataFrame, cfg: Config, now: pd.Timestamp, min_n: int | None = None) -> list[dict]:
@@ -213,4 +214,7 @@ def polish(f: dict[str, Any], ctx: Any) -> str | None:
     except (httpx.HTTPError, OSError):
         return None
     text = (data.get("message", {}).get("content") or "").strip()
-    return text if text and not agent.check_numbers(text, [facts_only]) else None
+    # Keep Gemma's wording only if every number checks out AND it still says what to open first.
+    if not text or agent.check_numbers(text, [facts_only]) or facts_only["open_first"].lower() not in text.lower():
+        return None
+    return text

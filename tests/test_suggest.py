@@ -74,9 +74,9 @@ def test_grid_scores_every_context_in_one_call(ctx: tools.Context, fast_model) -
     assert CountingRF.calls == 1
     combos = ctx.sessions.groupby(["hour_bucket", "starter_family"]).size()
     usable = set(combos[combos >= conditions.MIN_N].index.get_level_values(0))
-    hours = [NOW.floor("h") + pd.Timedelta(hours=i + 1) for i in range(suggest.GRID_HOURS)]
+    hours = [NOW.floor("h") + pd.Timedelta(hours=i) for i in range(suggest.GRID_HOURS)]
     assert len(grid) == sum(sessions_mod.hour_bucket(h.hour) in usable for h in hours)  # hours with an option
-    assert grid[0]["at"].startswith("2026-10-19T09:00")
+    assert grid[0]["at"].startswith("2026-10-19T08:00")  # covers the current hour
     for e in grid:
         assert all(o["sessions_seen"] >= conditions.MIN_N for o in e["options"])
         if e["best"]:
@@ -253,6 +253,21 @@ def test_project_name_is_local_only(data_dir: Path, ctx: tools.Context, fast_mod
     monkeypatch.setattr(agent, "_chat", fake_chat)
     suggest.polish(suggest.facts(payload, entry, now), pctx)
     assert sent and all(CANARY not in m for m in sent)
+
+
+def test_polish_discards_text_that_drops_the_suggestion(ctx: tools.Context, fast_model, work_wins, monkeypatch) -> None:
+    from sloth import agent
+
+    payload = suggest.build(ctx, NOW)
+    entry = next(e for e in payload["grid"] if e["best"])
+    f = suggest.facts(payload, entry, NOW)
+    n = f["sessions_seen"]
+    no_family = f"You tend to focus {f['p_focused_if_so']:.0%} of the time across {n} sessions."
+    monkeypatch.setattr(agent, "_chat", lambda *a, **k: {"message": {"content": no_family}})
+    assert suggest.polish(f, ctx) is None
+    good = f"Start with {f['open_first']}: it tends to work {f['p_focused_if_so']:.0%} of the time ({n} sessions)."
+    monkeypatch.setattr(agent, "_chat", lambda *a, **k: {"message": {"content": good}})
+    assert suggest.polish(f, ctx) == good
 
 
 def test_polish_discards_text_with_invented_numbers(ctx: tools.Context, fast_model, monkeypatch, work_wins) -> None:

@@ -133,7 +133,7 @@ class Daemon:
                 decision = f"short break ({away_min:.0f} min): no suggestion"
             self._away_since = None
         self._last_status = status
-        self.say(f"{now:%H:%M} {status}: {decision}")
+        self.say(f"{now.tz_convert(self.cfg.timezone):%H:%M} {status}: {decision}")
         return decision
 
 

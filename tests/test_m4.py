@@ -249,6 +249,14 @@ def test_number_checker_accepts_rounding_percent_and_times() -> None:
     assert agent.check_numbers("on 2026-10-18", results) == []  # dates are ignored
 
 
+def test_number_checker_flags_fraction_written_as_percent() -> None:
+    """Regression from the first real daemon cycle: rate 0.41 came out as "0.41%"."""
+    results = [{"p_focused_if_so": 0.41, "sessions_seen": 40}]
+    assert agent.check_numbers("focused 0.41% of the time", results) == ["0.41%"]
+    assert agent.check_numbers("focused 41% of the time across 40 sessions", results) == []
+    assert agent.check_numbers("a rate of 0.41", results) == []
+
+
 def test_number_checker_accepts_either_way_of_rounding_halves() -> None:
     """Regression from the first real timesheet: tool said 5.25, Gemma wrote 5.3 (half-up)."""
     results = [{"uncategorized_hours": 5.25}]
