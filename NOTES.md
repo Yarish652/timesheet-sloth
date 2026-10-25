@@ -325,3 +325,10 @@ nights, but hardly a plan.
 
 **Offline.** `uv run --offline sloth --help` works. Every real-data command in M2–M4 ran behind
 netguard, so any non-local connection attempt would have raised; none did.
+
+**Fresh clone, exactly the README steps** (cloned from the local repo; GitHub not pushed yet):
+`uv sync` 22 s · `ollama pull` (cached) · `sloth setup` 42 s (weights already in the TabPFN cache,
+so no download) · `python -m sloth.export` 4 min 43 s (84 active days, 153 h, 617 blocks; no
+`categories.json` in the clone → 0 rules → starter rules only). Then `sloth label --dry-run`
+worked, and **69 tests passed in the clone** (124 s), so the suite doesn't lean on local files.
+The clone held a copy of the real export and was deleted afterwards.
