@@ -3,6 +3,22 @@
 Numbers written by `sloth eval`. Each section is replaced when its command is re-run.
 Real-data sections are computed locally and contain aggregates only.
 
+<!-- summary -->
+## Summary (real data, final)
+
+| Task | TabPFN | Best baseline | Did TabPFN win? |
+|---|---|---|---|
+| Label Uncategorized (accuracy, holdout, starter rules on) | 0.808 | top_app lookup 0.333 | Yes. Partly relearning the rules; no hand-labelled score yet |
+| Label Uncategorized (accuracy, your rules only) | 0.727 | majority / lookup 0.673 | Barely (48 training blocks) |
+| Forecast focus, block MAE (min, shifts<=2) | 1.54 | always zero **1.16** | **No** |
+| Forecast focus, daily-total MAE (h, shifts<=2) | 0.66 | 4-week mean **0.65** | **No** (tie) |
+| Forecast focus, daily-total MAE (h, old switches<=6 rule) | **0.32** | always zero 0.40 | Yes, under the old focus rule only |
+| Session becomes focused (ROC-AUC, holdout) | **0.747** | rate by start hour 0.516 | Yes. Only ~8 positives in test |
+| Session becomes focused (Brier) | **0.119** | base rate 0.126 | Yes, small |
+
+Details for each row are in the sections below.
+<!-- /summary -->
+
 <!-- label:synthetic data, starter rules off -->
 ## Labeller (synthetic data, starter rules off)
 

@@ -307,3 +307,21 @@ tool result enters the message list is `agent._tool_message`, which serialises t
 `privacy.Guard.check`. That raises (without echoing the match) if any title ≥ 6 chars (single plain
 words need ≥ 12) or URL/host from the data appears. A canary test plants `SECRET-CANARY-7f3a` in
 titles and URLs and asserts that no tool output contains it, and that the guard blocks it.
+
+## M5: README, verification, polish (2026-10-25)
+
+**M4 verified after the fact.** Full suite on the committed M4 tree: 69 passed in 261 s (my M4
+report said 70; I'd miscounted 52 + 18 instead of 51 + 18).
+
+**`plan-tomorrow` with Gemma, real data, after closing a 3.6 GB Java process (4.1 GB free):**
+5 min 6 s end to end. TabPFN forecast 116 s (4,704 training blocks → 48), focus conditions
+fit 0.2 s + predict **4.2 s** (the same call took 30–41 s with ~1 GB free, so memory, not
+TabPFN, caused the earlier slowness), Gemma 2 calls 155 s (57 s model load, 155 output tokens at
+~2.5 tok/s). Number check passed. Two flaws: it forecast 2026-10-23 because the export ended
+mid-day on 10-23 and "tomorrow" is relative to the data; and Gemma dropped the "39 sessions"
+evidence the system prompt asks for. The checker catches invented numbers, not missing ones.
+Best windows were 00:00–03:00 at ~3–4 expected minutes each: honest given this person's
+nights, but hardly a plan.
+
+**Offline.** `uv run --offline sloth --help` works. Every real-data command in M2–M4 ran behind
+netguard, so any non-local connection attempt would have raised; none did.
